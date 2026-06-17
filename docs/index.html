@@ -109,33 +109,10 @@ body {
 			<div id="status-notice"></div>
 		</div>
 
-		<div id="debug-info" style="position:fixed;top:8px;left:8px;z-index:9999;background:rgba(0,0,0,0.8);color:#0f0;font-family:monospace;font-size:12px;padding:8px;border:1px solid #0f0;max-width:90vw;word-break:break-all;">
-			Loading index.js...
-		</div>
-		<script src="index.js" onerror="document.getElementById('debug-info').textContent='FAILED to load index.js'"></script>
+		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":35656676,"index.wasm":37695054},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":36250900,"index.wasm":37695054},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
-
-const dbg = document.getElementById('debug-info');
-function debugLog(msg) {
-	dbg.textContent = msg;
-	console.log('[debug]', msg);
-}
-
-try {
-	debugLog('index.js loaded. Checking browser features...');
-
-	const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
-	if (missing.length !== 0) {
-		debugLog('Missing features: ' + missing.join(', '));
-	} else {
-		debugLog('All features OK. Starting game (downloading ~73MB)...');
-	}
-} catch(e) {
-	debugLog('ERROR before game start: ' + e.message);
-}
-
 const engine = new Engine(GODOT_CONFIG);
 
 (function () {
@@ -152,7 +129,6 @@ const engine = new Engine(GODOT_CONFIG);
 		}
 		if (mode === 'hidden') {
 			statusOverlay.remove();
-			dbg.remove();
 			initializing = false;
 			return;
 		}
@@ -191,8 +167,36 @@ const engine = new Engine(GODOT_CONFIG);
 	});
 
 	if (missing.length !== 0) {
-		const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
-		displayFailureNotice(missingMsg + missing.join('\n'));
+		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
+			let serviceWorkerRegistrationPromise;
+			try {
+				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
+			} catch (err) {
+				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
+			}
+			// There's a chance that installing the service worker would fix the issue
+			Promise.race([
+				serviceWorkerRegistrationPromise.then((registration) => {
+					if (registration != null) {
+						return Promise.reject(new Error('Service worker already exists.'));
+					}
+					return registration;
+				}).then(() => engine.installServiceWorker()),
+				// For some reason, `getRegistration()` can stall
+				new Promise((resolve) => {
+					setTimeout(() => resolve(), 2000);
+				}),
+			]).then(() => {
+				// Reload if there was no error.
+				window.location.reload();
+			}).catch((err) => {
+				console.error('Error while registering service worker:', err);
+			});
+		} else {
+			// Display the message as usual
+			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
+			displayFailureNotice(missingMsg + missing.join('\n'));
+		}
 	} else {
 		setStatusMode('progress');
 		engine.startGame({
@@ -200,7 +204,6 @@ const engine = new Engine(GODOT_CONFIG);
 				if (current > 0 && total > 0) {
 					statusProgress.value = current;
 					statusProgress.max = total;
-					debugLog('Downloading: ' + Math.round(current/total*100) + '%');
 				} else {
 					statusProgress.removeAttribute('value');
 					statusProgress.removeAttribute('max');
