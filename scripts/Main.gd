@@ -237,6 +237,9 @@ var online_status_panel: ColorRect
 var online_status_label: Label
 var online_return_button: Button
 
+var paused := false
+var pause_layer: CanvasLayer
+
 func _unhandled_input(event: InputEvent) -> void:
 	# Development hotkeys.
 	# F6: print online input relay debug info.
@@ -274,10 +277,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif key_event.keycode == KEY_F12:
 				_network_join_room()
 				get_viewport().set_input_as_handled()
-			elif key_event.keycode == KEY_ESCAPE and online_game_active:
-				# Step 13: 繧ｪ繝ｳ繝ｩ繧､繝ｳ繧ｲ繝ｼ繝荳ｭ縺ｫESC縺ｧ繝ｭ繝薙・縺ｸ謌ｻ繧九◆繧√・髱槫ｸｸ蜿｣縺ｧ縺吶・
-				_return_to_online_lobby()
-				get_viewport().set_input_as_handled()
+			elif key_event.keycode == KEY_ESCAPE:
+				if mode != GameMode.TITLE and not game_over:
+					if paused:
+						_resume_game()
+					else:
+						_pause_game()
+					get_viewport().set_input_as_handled()
 
 func _ready() -> void:
 	rng.randomize()
@@ -308,6 +314,9 @@ func _process(delta: float) -> void:
 
 	if mode == GameMode.TITLE:
 		_handle_title_input()
+		return
+
+	if paused:
 		return
 
 	shoot_cd_p1 = maxf(0.0, shoot_cd_p1 - delta)
@@ -880,6 +889,73 @@ func _setup_ui() -> void:
 	game_over_layer.add_child(game_over_detail)
 
 	_setup_result_buttons()
+	_setup_pause_menu()
+
+func _setup_pause_menu() -> void:
+	pause_layer = CanvasLayer.new()
+	pause_layer.layer = 40
+	pause_layer.visible = false
+	pause_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(pause_layer)
+
+	var dim := ColorRect.new()
+	dim.position = Vector2.ZERO
+	dim.size = screen_size
+	dim.color = Color(0, 0, 0, 0.72)
+	pause_layer.add_child(dim)
+
+	var pause_title := Label.new()
+	pause_title.text = "PAUSED"
+	pause_title.position = Vector2(0, screen_size.y * 0.5 - 180)
+	pause_title.size = Vector2(screen_size.x, 100)
+	pause_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pause_title.add_theme_font_size_override("font_size", 80)
+	pause_title.add_theme_color_override("font_color", Color(0.2, 1.0, 0.85))
+	pause_layer.add_child(pause_title)
+
+	var hint := Label.new()
+	hint.text = "Press ESC to resume"
+	hint.position = Vector2(0, screen_size.y * 0.5 - 80)
+	hint.size = Vector2(screen_size.x, 50)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 28)
+	hint.add_theme_color_override("font_color", Color(0.65, 0.75, 0.85))
+	pause_layer.add_child(hint)
+
+	var btn_w := 360.0
+	var btn_h := 78.0
+	var gap := 40.0
+	var cx := screen_size.x * 0.5
+	var by := screen_size.y * 0.5 + 10.0
+
+	var resume_btn := _create_premium_button("Resume", Vector2(cx - btn_w - gap * 0.5, by), Vector2(btn_w, btn_h))
+	resume_btn.process_mode = Node.PROCESS_MODE_ALWAYS
+	resume_btn.pressed.connect(_on_pause_resume_pressed)
+	pause_layer.add_child(resume_btn)
+
+	var home_btn := _create_premium_button("Home", Vector2(cx + gap * 0.5, by), Vector2(btn_w, btn_h))
+	home_btn.process_mode = Node.PROCESS_MODE_ALWAYS
+	home_btn.pressed.connect(_on_pause_home_pressed)
+	pause_layer.add_child(home_btn)
+
+func _pause_game() -> void:
+	paused = true
+	pause_layer.visible = true
+
+func _resume_game() -> void:
+	paused = false
+	pause_layer.visible = false
+
+func _on_pause_resume_pressed() -> void:
+	_resume_game()
+
+func _on_pause_home_pressed() -> void:
+	_resume_game()
+	if online_game_active:
+		_return_to_online_lobby()
+	else:
+		_clear_game_objects()
+		_show_title()
 
 func _create_premium_button(text_value: String, position_value: Vector2, size_value: Vector2) -> Button:
 	# Creates a reusable premium-style button.
@@ -1640,7 +1716,7 @@ func _shoot(player_id: int) -> void:
 func _create_bullet(pos: Vector2, dir: Vector2, owner_id: int, damage: int, path: String, speed: float, size: float, piercing: bool = false) -> Dictionary:
 	var sprite := AssetPaths.create_sprite(path, Vector2(size, size), Color.WHITE, 20)
 	sprite.position = pos
-	sprite.rotation = dir.angle()
+	sprite.rotation = dir.angle() + PI / 2
 	add_child(sprite)
 
 	return {
@@ -1667,7 +1743,7 @@ func _update_bullets(delta: float) -> void:
 		b["pos"] = pos
 		b["life"] = life
 		(b["sprite"] as Sprite2D).position = pos
-		(b["sprite"] as Sprite2D).rotation = vel.angle()
+		(b["sprite"] as Sprite2D).rotation = vel.angle() + PI / 2
 		if life <= 0.0 or pos.x < -80 or pos.x > screen_size.x + 80 or pos.y < -80 or pos.y > screen_size.y + 80:
 			_remove_bullet(i)
 			continue
