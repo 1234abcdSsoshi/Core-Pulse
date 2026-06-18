@@ -78,6 +78,16 @@ func stop_bgm() -> void:
 	bgm_player.stop()
 
 
+func pause_bgm() -> void:
+	_ensure_players()
+	bgm_player.stream_paused = true
+
+
+func resume_bgm() -> void:
+	_ensure_players()
+	bgm_player.stream_paused = false
+
+
 func _on_bgm_finished() -> void:
 	# AudioStreamPlayer.finished is emitted when playback reaches the end.
 	# stop() does not emit this signal, so current_bgm_key safely controls looping.

@@ -157,6 +157,21 @@ var story_fusion_move_speed := 420.0
 var story_bomb_max_count := 3
 var story_bomb_cooldown := 0.8
 var story_bomb_trigger_radius := 34.0
+
+# Wave system & upgrades
+var story_wave_kill_count := 0
+var story_wave_target := 10
+var base_hp_max := 100
+var wave_upgrade_active := false
+var wave_upgrade_layer: CanvasLayer
+var upgrade_link_amp_count := 0
+var current_upgrade_choices: Array = []
+
+# Fusion flash & timer bar
+var fusion_flash_timer := 0.0
+var fusion_flash_rect: ColorRect
+var fusion_bar_back: ColorRect
+var fusion_bar_fill: ColorRect
 var story_bomb_explosion_radius := 185.0
 var story_bomb_fuse_time := 3.0
 var story_bomb_strong_damage := 55
@@ -254,6 +269,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		if key_event.pressed and not key_event.echo:
 			if network_room_entry_mode and _handle_room_code_input(key_event):
 				get_viewport().set_input_as_handled()
+				return
+
+			if wave_upgrade_active:
+				var choice := -1
+				if key_event.keycode == KEY_1 or key_event.keycode == KEY_KP_1:
+					choice = 0
+				elif key_event.keycode == KEY_2 or key_event.keycode == KEY_KP_2:
+					choice = 1
+				elif key_event.keycode == KEY_3 or key_event.keycode == KEY_KP_3:
+					choice = 2
+				if choice >= 0 and choice < current_upgrade_choices.size():
+					_apply_upgrade(String(current_upgrade_choices[choice]["id"]))
+					get_viewport().set_input_as_handled()
 				return
 
 			if key_event.keycode == KEY_F6:
@@ -890,6 +918,8 @@ func _setup_ui() -> void:
 
 	_setup_result_buttons()
 	_setup_pause_menu()
+	_setup_wave_upgrade_ui()
+	_setup_fusion_flash()
 
 func _setup_pause_menu() -> void:
 	pause_layer = CanvasLayer.new()
@@ -941,10 +971,14 @@ func _setup_pause_menu() -> void:
 func _pause_game() -> void:
 	paused = true
 	pause_layer.visible = true
+	if audio_manager != null:
+		audio_manager.pause_bgm()
 
 func _resume_game() -> void:
 	paused = false
 	pause_layer.visible = false
+	if audio_manager != null:
+		audio_manager.resume_bgm()
 
 func _on_pause_resume_pressed() -> void:
 	_resume_game()
@@ -956,6 +990,212 @@ func _on_pause_home_pressed() -> void:
 	else:
 		_clear_game_objects()
 		_show_title()
+
+# ── Wave upgrade system ──────────────────────────────────────────────────────
+
+func _setup_wave_upgrade_ui() -> void:
+	wave_upgrade_layer = CanvasLayer.new()
+	wave_upgrade_layer.layer = 35
+	wave_upgrade_layer.visible = false
+	add_child(wave_upgrade_layer)
+
+func _complete_wave() -> void:
+	if story_fusion_active:
+		_deactivate_story_fusion()
+	story_wave += 1
+	story_wave_kill_count = 0
+	story_wave_target = 8 + story_wave * 3
+	_show_wave_upgrade()
+
+func _show_wave_upgrade() -> void:
+	wave_upgrade_active = true
+	for child in wave_upgrade_layer.get_children():
+		child.free()
+	wave_upgrade_layer.visible = true
+	if audio_manager != null:
+		audio_manager.pause_bgm()
+
+	var all_upgrades: Array = [
+		{"id": "medic",        "name": "MEDIC SUPPLY",   "desc": "Restore 30 Core HP",         "color": Color(0.2, 1.0, 0.5)},
+		{"id": "azure_boost",  "name": "AZURE BOOST",    "desc": "P1: Speed +80 / Damage +2",  "color": Color(0.2, 0.8, 1.0)},
+		{"id": "solar_boost",  "name": "SOLAR BOOST",    "desc": "P2: Speed +50 / Damage +6",  "color": Color(1.0, 0.65, 0.2)},
+		{"id": "rapid_strike", "name": "RAPID STRIKE",   "desc": "Both: Fire Rate +25%",       "color": Color(1.0, 0.35, 0.85)},
+		{"id": "core_armor",   "name": "CORE ARMOR",     "desc": "Max HP +30 / Restore 15 HP", "color": Color(0.4, 0.7, 1.0)},
+		{"id": "bullet_storm", "name": "BULLET STORM",   "desc": "Both: Bullet Speed +200",    "color": Color(1.0, 0.9, 0.25)},
+		{"id": "overdrive",    "name": "OVERDRIVE",      "desc": "Both: Damage +4",            "color": Color(1.0, 0.3, 0.3)},
+		{"id": "link_amp",     "name": "LINK AMPLIFIER", "desc": "Link Gauge fills 50% faster","color": Color(0.5, 1.0, 0.75)},
+	]
+	all_upgrades.shuffle()
+	current_upgrade_choices = all_upgrades.slice(0, 3)
+
+	var card_w := 440.0
+	var card_h := 320.0
+	var gap := 44.0
+	var total_w := card_w * 3.0 + gap * 2.0
+	var sx := screen_size.x * 0.5 - total_w * 0.5
+	var cy := screen_size.y * 0.5 - card_h * 0.5 + 30.0
+
+	# Background
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.size = screen_size
+	dim.color = Color(0, 0, 0, 0.75)
+	wave_upgrade_layer.add_child(dim)
+
+	# Title
+	var title_lbl := Label.new()
+	title_lbl.text = "WAVE %d CLEAR" % (story_wave - 1)
+	title_lbl.position = Vector2(0, 90)
+	title_lbl.size = Vector2(screen_size.x, 90)
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 70)
+	title_lbl.add_theme_color_override("font_color", Color(0.2, 1.0, 0.85))
+	wave_upgrade_layer.add_child(title_lbl)
+
+	var sub_lbl := Label.new()
+	sub_lbl.text = "Press  1 / 2 / 3  to choose an upgrade"
+	sub_lbl.position = Vector2(0, 192)
+	sub_lbl.size = Vector2(screen_size.x, 50)
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.add_theme_font_size_override("font_size", 32)
+	sub_lbl.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+	wave_upgrade_layer.add_child(sub_lbl)
+
+	# Cards (display only — keyboard selects)
+	for i in range(3):
+		var u: Dictionary = current_upgrade_choices[i]
+		var px := sx + i * (card_w + gap)
+
+		var bg := ColorRect.new()
+		bg.position = Vector2(px, cy)
+		bg.size = Vector2(card_w, card_h)
+		bg.color = Color(0.04, 0.07, 0.15, 0.96)
+		wave_upgrade_layer.add_child(bg)
+
+		var border := ColorRect.new()
+		border.position = Vector2(px, cy)
+		border.size = Vector2(card_w, 3)
+		border.color = u["color"]
+		wave_upgrade_layer.add_child(border)
+
+		var num_lbl := Label.new()
+		num_lbl.text = "[%d]" % (i + 1)
+		num_lbl.position = Vector2(px, cy + 20)
+		num_lbl.size = Vector2(card_w, 44)
+		num_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		num_lbl.add_theme_font_size_override("font_size", 38)
+		num_lbl.add_theme_color_override("font_color", u["color"])
+		wave_upgrade_layer.add_child(num_lbl)
+
+		var name_lbl := Label.new()
+		name_lbl.text = String(u["name"])
+		name_lbl.position = Vector2(px, cy + 82)
+		name_lbl.size = Vector2(card_w, 54)
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_lbl.add_theme_font_size_override("font_size", 28)
+		name_lbl.add_theme_color_override("font_color", u["color"])
+		wave_upgrade_layer.add_child(name_lbl)
+
+		var sep := ColorRect.new()
+		sep.position = Vector2(px + card_w * 0.1, cy + 148)
+		sep.size = Vector2(card_w * 0.8, 2)
+		sep.color = Color(u["color"].r, u["color"].g, u["color"].b, 0.4)
+		wave_upgrade_layer.add_child(sep)
+
+		var desc_lbl := Label.new()
+		desc_lbl.text = String(u["desc"])
+		desc_lbl.position = Vector2(px + 16, cy + 166)
+		desc_lbl.size = Vector2(card_w - 32, 130)
+		desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		desc_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		desc_lbl.add_theme_font_size_override("font_size", 28)
+		desc_lbl.add_theme_color_override("font_color", Color(0.88, 0.93, 1.0))
+		wave_upgrade_layer.add_child(desc_lbl)
+
+func _apply_upgrade(id: String) -> void:
+	match id:
+		"medic":
+			base_hp = min(base_hp_max, base_hp + 30)
+		"azure_boost":
+			for p in players:
+				if int(p["id"]) == 1:
+					p["speed"] = float(p["speed"]) + 80.0
+					p["damage"] = int(p["damage"]) + 2
+		"solar_boost":
+			for p in players:
+				if int(p["id"]) == 2:
+					p["speed"] = float(p["speed"]) + 50.0
+					p["damage"] = int(p["damage"]) + 6
+		"rapid_strike":
+			for p in players:
+				p["shoot_interval"] = float(p["shoot_interval"]) * 0.75
+				p["rapid_interval"] = float(p["rapid_interval"]) * 0.75
+		"core_armor":
+			base_hp_max += 30
+			base_hp = min(base_hp_max, base_hp + 15)
+		"bullet_storm":
+			for p in players:
+				p["shot_speed"] = float(p["shot_speed"]) + 200.0
+		"overdrive":
+			for p in players:
+				p["damage"] = int(p["damage"]) + 4
+		"link_amp":
+			upgrade_link_amp_count += 1
+	_hide_wave_upgrade()
+
+func _hide_wave_upgrade() -> void:
+	wave_upgrade_active = false
+	wave_upgrade_layer.visible = false
+	enemy_spawn_timer = 2.5
+	item_spawn_timer = 4.0
+	banner_label.text = "WAVE %d  START!" % story_wave
+	if audio_manager != null:
+		audio_manager.resume_bgm()
+
+# ── Enemy drop ───────────────────────────────────────────────────────────────
+
+func _spawn_enemy_drop(pos: Vector2) -> void:
+	var pool: Array[String] = ["heal", "heal", "rapid_fire", "shield", "power_boost"]
+	var key: String = pool[rng.randi_range(0, pool.size() - 1)]
+	var sprite := AssetPaths.create_sprite(AssetPaths.ITEMS[key], Vector2(58, 58), Color(1.0, 0.88, 0.22), 12)
+	sprite.position = pos
+	add_child(sprite)
+	items.append({"key": key, "pos": pos, "sprite": sprite, "radius": 34.0})
+
+# ── Fusion flash & timer bar ─────────────────────────────────────────────────
+
+func _setup_fusion_flash() -> void:
+	var flash_layer := CanvasLayer.new()
+	flash_layer.layer = 50
+	add_child(flash_layer)
+	fusion_flash_rect = ColorRect.new()
+	fusion_flash_rect.position = Vector2.ZERO
+	fusion_flash_rect.size = screen_size
+	fusion_flash_rect.color = Color(0.5, 0.9, 1.0, 0.0)
+	flash_layer.add_child(fusion_flash_rect)
+
+	var bar_layer := CanvasLayer.new()
+	bar_layer.layer = 22
+	add_child(bar_layer)
+	fusion_bar_back = ColorRect.new()
+	fusion_bar_back.position = Vector2(screen_size.x * 0.5 - 340, 10)
+	fusion_bar_back.size = Vector2(680, 18)
+	fusion_bar_back.color = Color(0.08, 0.12, 0.2, 0.85)
+	fusion_bar_back.visible = false
+	bar_layer.add_child(fusion_bar_back)
+	fusion_bar_fill = ColorRect.new()
+	fusion_bar_fill.position = fusion_bar_back.position
+	fusion_bar_fill.size = Vector2(680, 18)
+	fusion_bar_fill.color = Color(0.25, 1.0, 0.75, 0.9)
+	fusion_bar_fill.visible = false
+	bar_layer.add_child(fusion_bar_fill)
+	var bar_label := Label.new()
+	bar_label.text = "FUSION"
+	bar_label.position = Vector2(screen_size.x * 0.5 - 36, 6)
+	bar_label.add_theme_font_size_override("font_size", 16)
+	bar_label.add_theme_color_override("font_color", Color(0.2, 1.0, 0.85))
+	bar_label.visible = false
+	bar_layer.add_child(bar_label)
 
 func _create_premium_button(text_value: String, position_value: Vector2, size_value: Vector2) -> Button:
 	# Creates a reusable premium-style button.
@@ -1511,6 +1751,14 @@ func _start_story() -> void:
 		(p["sprite"] as Sprite2D).visible = true
 		(p["shield_sprite"] as Sprite2D).visible = false
 
+	story_wave_kill_count = 0
+	story_wave_target = 10
+	base_hp_max = 100
+	upgrade_link_amp_count = 0
+	wave_upgrade_active = false
+	if wave_upgrade_layer != null:
+		wave_upgrade_layer.visible = false
+
 	banner_label.text = "STORY MODE"
 	if audio_manager != null:
 		audio_manager.play_bgm("story")
@@ -1832,6 +2080,17 @@ func _remove_bullet(index: int) -> void:
 	bullets.remove_at(index)
 
 func _update_story(delta: float) -> void:
+	if wave_upgrade_active:
+		return
+
+	if fusion_flash_timer > 0.0:
+		fusion_flash_timer -= delta
+		fusion_flash_rect.color.a = fusion_flash_timer / 0.35 * 0.82
+
+	if story_fusion_active and fusion_bar_fill != null:
+		var ratio := story_fusion_timer / story_fusion_duration
+		fusion_bar_fill.size.x = 680.0 * clampf(ratio, 0.0, 1.0)
+
 	enemy_spawn_timer -= delta
 	item_spawn_timer -= delta
 	core_shield_time = maxf(0.0, core_shield_time - delta)
@@ -1854,7 +2113,8 @@ func _update_story(delta: float) -> void:
 		var near_players := p1_pos.distance_to(p2_pos) < 360.0
 		var near_core := p1_pos.distance_to(base_sprite.position) < 430.0 and p2_pos.distance_to(base_sprite.position) < 430.0
 		if near_players or near_core:
-			coop_link = clampf(coop_link + 11.0 * delta, 0.0, 100.0)
+			var link_rate := 11.0 * (1.0 + upgrade_link_amp_count * 0.5)
+			coop_link = clampf(coop_link + link_rate * delta, 0.0, 100.0)
 		else:
 			coop_link = clampf(coop_link - 5.0 * delta, 0.0, 100.0)
 
@@ -1915,6 +2175,13 @@ func _activate_story_fusion(reason: String = "LINK READY") -> void:
 	banner_label.text = "TWIN CORE FUSION ACTIVATED"
 	if audio_manager != null:
 		audio_manager.play_sfx("twin_core_cannon", -4.0)
+	fusion_flash_timer = 0.35
+	if fusion_flash_rect != null:
+		fusion_flash_rect.color = Color(0.5, 0.9, 1.0, 0.82)
+	if fusion_bar_back != null:
+		fusion_bar_back.visible = true
+		fusion_bar_fill.visible = true
+		fusion_bar_fill.size.x = 680.0
 
 
 func _update_story_fusion(delta: float) -> void:
@@ -2013,6 +2280,9 @@ func _deactivate_story_fusion() -> void:
 			(p["sprite"] as Sprite2D).position = p["pos"]
 
 	banner_label.text = "FUSION COMPLETE"
+	if fusion_bar_back != null:
+		fusion_bar_back.visible = false
+		fusion_bar_fill.visible = false
 
 
 func _update_fusion_pointer_visuals() -> void:
@@ -2140,6 +2410,12 @@ func _update_enemies(delta: float) -> void:
 			if is_instance_valid(e["sprite"]):
 				(e["sprite"] as Sprite2D).queue_free()
 			enemies.remove_at(i)
+			if mode == GameMode.STORY:
+				if rng.randf() < 0.28:
+					_spawn_enemy_drop(pos)
+				story_wave_kill_count += 1
+				if story_wave_kill_count >= story_wave_target:
+					_complete_wave()
 		elif pos.y > screen_size.y + 100 or pos.distance_to(target) < 60.0:
 			if mode == GameMode.STORY and core_shield_time > 0.0:
 				core_shield_time = maxf(0.0, core_shield_time - 1.0)
@@ -2155,8 +2431,15 @@ func _update_enemies(delta: float) -> void:
 			enemies.remove_at(i)
 
 func _spawn_item() -> void:
-	var keys: Array[String] = ["heal", "rapid_fire", "shield", "power_boost", "link_charge"]
-	var key: String = keys[rng.randi_range(0, keys.size() - 1)]
+	# Weighted pool: heal×3, rapid_fire×2, shield×2, power_boost×2, link_charge×1 = 10 total
+	var pool: Array[String] = [
+		"heal", "heal", "heal",
+		"rapid_fire", "rapid_fire",
+		"shield", "shield",
+		"power_boost", "power_boost",
+		"link_charge",
+	]
+	var key: String = pool[rng.randi_range(0, pool.size() - 1)]
 	var pos := Vector2(rng.randf_range(120.0, screen_size.x - 120.0), rng.randf_range(160.0, screen_size.y - 180.0))
 	var sprite := AssetPaths.create_sprite(AssetPaths.ITEMS[key], Vector2(76, 76), Color(0.2, 1.0, 0.7), 12)
 	sprite.position = pos
