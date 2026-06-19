@@ -316,3 +316,4 @@ Twin Core Blasters WebSocket server listening on ws://0.0.0.0:8080
 | フュージョン演出強化 | 発動時に青白いフラッシュ・残り時間バーを追加 |
 | Link Charge調整 | 出現率を他アイテムより低く調整 |
 | コア体力の設定変数化 | `Main.gd` 冒頭の `CORE_HP_MAX` を変更するだけで体力を調整可能 |
+| ショップアイコン刷新 | 武器4種・タレット4種・アイテム2種・HUDアイコンを高品質画像に再生成（`generate_assets.py`） |
