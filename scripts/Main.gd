@@ -20,7 +20,7 @@ enum GameMode { TITLE, STORY, ASTRAL_COURT, RAID }
 
 # ── ゲームバランス設定 ────────────────────────────────────────────────────────
 # ここの値を変えるだけでバランス調整できます。
-const CORE_HP_MAX := 100       # コアの最大体力（Story Mode）
+const CORE_HP_MAX := 10000      # コアの最大体力（Story Mode）
 # ─────────────────────────────────────────────────────────────────────────────
 
 var mode: GameMode = GameMode.TITLE
@@ -177,6 +177,7 @@ var crystals := 0
 var crystal_objects: Array[Dictionary] = []
 var crystal_magnet_timer := 0.0
 var shop_active := false
+var shop_page := 0  # 0=ITEMS  1=WEAPONS  2=TURRETS
 var shop_layer: CanvasLayer
 var hud_crystal_label: Label
 var shop_notify_ring: ColorRect
@@ -1153,139 +1154,293 @@ func _rebuild_shop_ui() -> void:
 	for child in shop_layer.get_children():
 		child.queue_free()
 
-	# dim
+	# ── 背景 dim ──
 	var dim := ColorRect.new()
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.size = screen_size
-	dim.color = Color(0, 0, 0, 0.82)
+	dim.color = Color(0, 0, 0, 0.88)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	shop_layer.add_child(dim)
 
-	# title
+	# ── タイトル ──
 	var title := Label.new()
 	title.text = "CRYSTAL  SHOP"
-	title.position = Vector2(0, 28)
-	title.size = Vector2(screen_size.x, 70)
+	title.position = Vector2(0, 18)
+	title.size = Vector2(screen_size.x, 60)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 58)
+	title.add_theme_font_size_override("font_size", 50)
 	title.add_theme_color_override("font_color", Color(0.2, 0.95, 1.0))
 	shop_layer.add_child(title)
 
-	# crystal counter
+	# ── 所持クリスタル表示 ──
 	var clbl := Label.new()
 	clbl.text = "💎 %d" % crystals
-	clbl.position = Vector2(screen_size.x - 260, 38)
-	clbl.size = Vector2(240, 50)
+	clbl.position = Vector2(screen_size.x - 280, 22)
+	clbl.size = Vector2(200, 44)
 	clbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	clbl.add_theme_font_size_override("font_size", 36)
+	clbl.add_theme_font_size_override("font_size", 34)
 	clbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.9))
 	shop_layer.add_child(clbl)
 
-	# close hint
+	# ── 閉じるボタン（×） ──
+	var close_btn := Button.new()
+	close_btn.text = "✕  CLOSE"
+	close_btn.position = Vector2(screen_size.x - 170, 16)
+	close_btn.size = Vector2(150, 46)
+	close_btn.add_theme_font_size_override("font_size", 20)
+	close_btn.pressed.connect(_close_shop)
+	shop_layer.add_child(close_btn)
+
+	# ── ページタブ ──
+	var tab_labels := ["  ITEMS  ", "  WEAPONS  ", "  TURRETS  "]
+	var tab_colors := [Color(0.2, 1.0, 0.5), Color(0.2, 0.8, 1.0), Color(1.0, 0.6, 0.2)]
+	var tab_total_w := 820.0
+	var tab_x := screen_size.x * 0.5 - tab_total_w * 0.5
+	var tab_y := 82.0
+	var tab_widths := [240.0, 290.0, 270.0]
+	var tab_gap := 10.0
+	var tx := tab_x
+	for ti in range(3):
+		var tw := tab_widths[ti]
+		var is_active := ti == shop_page
+		var tab_bg := ColorRect.new()
+		tab_bg.position = Vector2(tx, tab_y)
+		tab_bg.size = Vector2(tw, 44)
+		tab_bg.color = Color(tab_colors[ti].r * 0.25, tab_colors[ti].g * 0.25, tab_colors[ti].b * 0.25, 0.95) if is_active else Color(0.06, 0.08, 0.14, 0.9)
+		tab_bg.mouse_filter = Control.MOUSE_FILTER_STOP
+		shop_layer.add_child(tab_bg)
+		if is_active:
+			var underline := ColorRect.new()
+			underline.position = Vector2(tx, tab_y + 41)
+			underline.size = Vector2(tw, 3)
+			underline.color = tab_colors[ti]
+			shop_layer.add_child(underline)
+		var tab_lbl := Label.new()
+		tab_lbl.text = tab_labels[ti]
+		tab_lbl.position = Vector2(tx, tab_y + 8)
+		tab_lbl.size = Vector2(tw, 30)
+		tab_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tab_lbl.add_theme_font_size_override("font_size", 22)
+		tab_lbl.add_theme_color_override("font_color", tab_colors[ti] if is_active else Color(0.5, 0.55, 0.6))
+		shop_layer.add_child(tab_lbl)
+		var tab_btn := Button.new()
+		tab_btn.position = Vector2(tx, tab_y)
+		tab_btn.size = Vector2(tw, 44)
+		tab_btn.flat = true
+		tab_btn.modulate = Color(1, 1, 1, 0)
+		var captured_page := ti
+		tab_btn.pressed.connect(func(): shop_page = captured_page; _rebuild_shop_ui())
+		shop_layer.add_child(tab_btn)
+		tx += tw + tab_gap
+
+	# ── キーヒント ──
 	var hint := Label.new()
-	hint.text = "Tab / ESC  to close"
-	hint.position = Vector2(0, screen_size.y - 52)
-	hint.size = Vector2(screen_size.x, 40)
+	hint.text = "Tab / ESC  でゲームに戻る"
+	hint.position = Vector2(0, screen_size.y - 40)
+	hint.size = Vector2(screen_size.x, 32)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 26)
-	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	hint.add_theme_font_size_override("font_size", 22)
+	hint.add_theme_color_override("font_color", Color(0.45, 0.52, 0.62))
 	shop_layer.add_child(hint)
 
-	var shop_catalog := _build_shop_catalog()
-	var sections := [
-		{"label": "ITEMS",   "color": Color(0.2, 1.0, 0.5),  "ids": ["core_repair", "mega_bomb", "crystal_magnet", "overclock", "emp_burst"]},
-		{"label": "WEAPONS", "color": Color(0.2, 0.8, 1.0),  "ids": ["side_cannon", "spread_shot", "homing_missile", "twin_laser"]},
-		{"label": "TURRETS", "color": Color(1.0, 0.55, 0.2), "ids": ["auto_cannon", "laser_tower", "missile_pod", "shield_wall"]},
+	# ── ページ描画 ──
+	var catalog := _build_shop_catalog()
+	match shop_page:
+		0: _draw_shop_items_page(catalog)
+		1: _draw_shop_weapons_page(catalog)
+		2: _draw_shop_turrets_page(catalog)
+
+func _draw_shop_items_page(catalog: Dictionary) -> void:
+	var ids := ["core_repair", "mega_bomb", "crystal_magnet", "overclock", "emp_burst"]
+	var accent := Color(0.2, 1.0, 0.5)
+	var card_w := 330.0
+	var card_h := 680.0
+	var gap := 22.0
+	var total_w := card_w * ids.size() + gap * (ids.size() - 1)
+	var sx := screen_size.x * 0.5 - total_w * 0.5
+	var cy := 140.0
+	for ci in range(ids.size()):
+		var id: String = ids[ci]
+		var info: Dictionary = catalog[id]
+		var cx := sx + ci * (card_w + gap)
+		_draw_shop_card(id, info, cx, cy, card_w, card_h, accent, false)
+
+func _draw_shop_weapons_page(catalog: Dictionary) -> void:
+	var ids := ["side_cannon", "spread_shot", "homing_missile", "twin_laser"]
+	var accent := Color(0.2, 0.8, 1.0)
+	var card_w := 430.0
+	var card_h := 680.0
+	var gap := 28.0
+	var total_w := card_w * ids.size() + gap * (ids.size() - 1)
+	var sx := screen_size.x * 0.5 - total_w * 0.5
+	var cy := 140.0
+
+	# 現在の装備状況
+	var status_lbl := Label.new()
+	status_lbl.text = "現在の装備 —  P1: %s   P2: %s" % [
+		p1_weapon if p1_weapon != "" else "なし",
+		p2_weapon if p2_weapon != "" else "なし"
 	]
+	status_lbl.position = Vector2(0, cy - 36)
+	status_lbl.size = Vector2(screen_size.x, 30)
+	status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status_lbl.add_theme_font_size_override("font_size", 22)
+	status_lbl.add_theme_color_override("font_color", Color(0.6, 0.75, 0.9))
+	shop_layer.add_child(status_lbl)
 
-	var section_y := 115.0
-	for sec in sections:
-		var sec_label := Label.new()
-		sec_label.text = String(sec["label"])
-		sec_label.position = Vector2(40, section_y)
-		sec_label.size = Vector2(200, 44)
-		sec_label.add_theme_font_size_override("font_size", 30)
-		sec_label.add_theme_color_override("font_color", sec["color"] as Color)
-		shop_layer.add_child(sec_label)
+	for ci in range(ids.size()):
+		var id: String = ids[ci]
+		var info: Dictionary = catalog[id]
+		var cx := sx + ci * (card_w + gap)
+		_draw_shop_card(id, info, cx, cy, card_w, card_h, accent, true)
 
-		var ids: Array = sec["ids"]
-		var card_w := 220.0
-		var card_h := 260.0
-		var gap := 24.0
-		var start_x := 240.0
+func _draw_shop_turrets_page(catalog: Dictionary) -> void:
+	var ids := ["auto_cannon", "laser_tower", "missile_pod", "shield_wall"]
+	var accent := Color(1.0, 0.6, 0.2)
+	var card_w := 430.0
+	var card_h := 680.0
+	var gap := 28.0
+	var total_w := card_w * ids.size() + gap * (ids.size() - 1)
+	var sx := screen_size.x * 0.5 - total_w * 0.5
+	var cy := 140.0
 
-		for ci in range(ids.size()):
-			var id: String = ids[ci]
-			var info: Dictionary = shop_catalog[id]
-			var cx := start_x + ci * (card_w + gap)
-			var cy := section_y
+	# 設置数表示
+	var status_lbl := Label.new()
+	status_lbl.text = "設置数: %d / %d  （購入すると自動でコア周囲に配置されます）" % [turrets.size(), max_turrets]
+	status_lbl.position = Vector2(0, cy - 36)
+	status_lbl.size = Vector2(screen_size.x, 30)
+	status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status_lbl.add_theme_font_size_override("font_size", 22)
+	status_lbl.add_theme_color_override("font_color", Color(0.6, 0.75, 0.9))
+	shop_layer.add_child(status_lbl)
 
-			var can_buy := crystals >= int(info["price"])
-			var bg := ColorRect.new()
-			bg.position = Vector2(cx, cy)
-			bg.size = Vector2(card_w, card_h)
-			bg.color = Color(0.05, 0.08, 0.16, 0.95) if can_buy else Color(0.04, 0.05, 0.09, 0.95)
-			bg.mouse_filter = Control.MOUSE_FILTER_STOP
-			shop_layer.add_child(bg)
+	for ci in range(ids.size()):
+		var id: String = ids[ci]
+		var info: Dictionary = catalog[id]
+		var cx := sx + ci * (card_w + gap)
+		_draw_shop_card(id, info, cx, cy, card_w, card_h, accent, false)
 
-			var accent: Color = sec["color"]
-			var border := ColorRect.new()
-			border.position = Vector2(cx, cy)
-			border.size = Vector2(card_w, 3)
-			border.color = accent if can_buy else Color(accent.r * 0.4, accent.g * 0.4, accent.b * 0.4)
-			shop_layer.add_child(border)
+func _draw_shop_card(id: String, info: Dictionary, cx: float, cy: float, card_w: float, card_h: float, accent: Color, is_weapon: bool) -> void:
+	var can_buy := crystals >= int(info["price"])
+	var dim_accent := Color(accent.r * 0.35, accent.g * 0.35, accent.b * 0.35)
 
-			# icon
-			var icon_path := _get_shop_icon_path(id)
-			if icon_path != "":
-				var icon_sprite := AssetPaths.create_sprite(icon_path, Vector2(72, 72), Color(0.5, 0.5, 0.5))
-				icon_sprite.position = Vector2(cx + card_w * 0.5, cy + 50)
-				icon_sprite.z_index = 46
-				shop_layer.add_child(icon_sprite)
+	# 背景
+	var bg := ColorRect.new()
+	bg.position = Vector2(cx, cy)
+	bg.size = Vector2(card_w, card_h)
+	bg.color = Color(0.05, 0.09, 0.18, 0.97) if can_buy else Color(0.04, 0.05, 0.10, 0.97)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	shop_layer.add_child(bg)
 
-			var name_lbl := Label.new()
-			name_lbl.text = String(info["name"])
-			name_lbl.position = Vector2(cx + 4, cy + 96)
-			name_lbl.size = Vector2(card_w - 8, 44)
-			name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			name_lbl.add_theme_font_size_override("font_size", 20)
-			name_lbl.add_theme_color_override("font_color", accent if can_buy else Color(0.4, 0.45, 0.5))
-			shop_layer.add_child(name_lbl)
+	# 上部アクセントライン
+	var border_top := ColorRect.new()
+	border_top.position = Vector2(cx, cy)
+	border_top.size = Vector2(card_w, 4)
+	border_top.color = accent if can_buy else dim_accent
+	shop_layer.add_child(border_top)
 
-			var desc_lbl := Label.new()
-			desc_lbl.text = String(info["desc"])
-			desc_lbl.position = Vector2(cx + 6, cy + 140)
-			desc_lbl.size = Vector2(card_w - 12, 70)
-			desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			desc_lbl.add_theme_font_size_override("font_size", 16)
-			desc_lbl.add_theme_color_override("font_color", Color(0.75, 0.82, 0.9) if can_buy else Color(0.35, 0.38, 0.42))
-			shop_layer.add_child(desc_lbl)
+	# 左サイドライン
+	var border_left := ColorRect.new()
+	border_left.position = Vector2(cx, cy)
+	border_left.size = Vector2(3, card_h)
+	border_left.color = Color(accent.r, accent.g, accent.b, 0.4) if can_buy else Color(dim_accent.r, dim_accent.g, dim_accent.b, 0.3)
+	shop_layer.add_child(border_left)
 
-			var price_lbl := Label.new()
-			price_lbl.text = "💎 %d" % int(info["price"])
-			price_lbl.position = Vector2(cx, cy + card_h - 52)
-			price_lbl.size = Vector2(card_w, 30)
-			price_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			price_lbl.add_theme_font_size_override("font_size", 22)
-			price_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.6) if can_buy else Color(0.4, 0.4, 0.4))
-			shop_layer.add_child(price_lbl)
+	# アイコン（大）
+	var icon_path := _get_shop_icon_path(id)
+	if icon_path != "":
+		var icon_sprite := AssetPaths.create_sprite(icon_path, Vector2(110, 110), Color(0.6, 0.6, 0.6))
+		icon_sprite.position = Vector2(cx + card_w * 0.5, cy + 76)
+		icon_sprite.z_index = 46
+		shop_layer.add_child(icon_sprite)
 
-			if can_buy:
-				var btn := Button.new()
-				btn.text = "BUY"
-				btn.position = Vector2(cx + 30, cy + card_h - 38)
-				btn.size = Vector2(card_w - 60, 32)
-				btn.add_theme_font_size_override("font_size", 18)
-				var captured_id := id
-				var is_weapon := String(sec["label"]) == "WEAPONS"
-				if is_weapon:
-					btn.pressed.connect(_open_player_selector.bind(captured_id))
-				else:
-					btn.pressed.connect(_purchase.bind(captured_id, 0))
-				shop_layer.add_child(btn)
+	# アイコン下のアクセント横線
+	var sep1 := ColorRect.new()
+	sep1.position = Vector2(cx + 20, cy + 140)
+	sep1.size = Vector2(card_w - 40, 1)
+	sep1.color = Color(accent.r, accent.g, accent.b, 0.25)
+	shop_layer.add_child(sep1)
 
-		section_y += card_h + 52.0
+	# アイテム名
+	var name_lbl := Label.new()
+	name_lbl.text = String(info["name"])
+	name_lbl.position = Vector2(cx + 8, cy + 150)
+	name_lbl.size = Vector2(card_w - 16, 46)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.add_theme_font_size_override("font_size", 26)
+	name_lbl.add_theme_color_override("font_color", accent if can_buy else dim_accent)
+	shop_layer.add_child(name_lbl)
+
+	# 概要テキスト
+	var short_lbl := Label.new()
+	short_lbl.text = String(info["short"])
+	short_lbl.position = Vector2(cx + 8, cy + 200)
+	short_lbl.size = Vector2(card_w - 16, 36)
+	short_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	short_lbl.add_theme_font_size_override("font_size", 18)
+	short_lbl.add_theme_color_override("font_color", Color(0.85, 0.92, 1.0) if can_buy else Color(0.38, 0.42, 0.48))
+	shop_layer.add_child(short_lbl)
+
+	# 区切り線
+	var sep2 := ColorRect.new()
+	sep2.position = Vector2(cx + 20, cy + 244)
+	sep2.size = Vector2(card_w - 40, 1)
+	sep2.color = Color(accent.r, accent.g, accent.b, 0.18)
+	shop_layer.add_child(sep2)
+
+	# 詳細説明
+	var detail_lbl := Label.new()
+	detail_lbl.text = String(info["detail"])
+	detail_lbl.position = Vector2(cx + 16, cy + 254)
+	detail_lbl.size = Vector2(card_w - 32, 280)
+	detail_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	detail_lbl.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	detail_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	detail_lbl.add_theme_font_size_override("font_size", 17)
+	detail_lbl.add_theme_color_override("font_color", Color(0.68, 0.76, 0.88) if can_buy else Color(0.32, 0.36, 0.42))
+	shop_layer.add_child(detail_lbl)
+
+	# 区切り線2
+	var sep3 := ColorRect.new()
+	sep3.position = Vector2(cx + 20, cy + card_h - 110)
+	sep3.size = Vector2(card_w - 40, 1)
+	sep3.color = Color(accent.r, accent.g, accent.b, 0.22)
+	shop_layer.add_child(sep3)
+
+	# 価格
+	var price_lbl := Label.new()
+	price_lbl.text = "💎  %d" % int(info["price"])
+	price_lbl.position = Vector2(cx, cy + card_h - 102)
+	price_lbl.size = Vector2(card_w, 36)
+	price_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	price_lbl.add_theme_font_size_override("font_size", 28)
+	price_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.65) if can_buy else Color(0.35, 0.38, 0.42))
+	shop_layer.add_child(price_lbl)
+
+	# 購入可否テキスト
+	if not can_buy:
+		var lack_lbl := Label.new()
+		lack_lbl.text = "あと 💎 %d 必要" % (int(info["price"]) - crystals)
+		lack_lbl.position = Vector2(cx, cy + card_h - 66)
+		lack_lbl.size = Vector2(card_w, 28)
+		lack_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lack_lbl.add_theme_font_size_override("font_size", 16)
+		lack_lbl.add_theme_color_override("font_color", Color(0.6, 0.3, 0.3))
+		shop_layer.add_child(lack_lbl)
+
+	# BUYボタン
+	if can_buy:
+		var btn := Button.new()
+		btn.text = "購入する  BUY"
+		btn.position = Vector2(cx + 36, cy + card_h - 54)
+		btn.size = Vector2(card_w - 72, 44)
+		btn.add_theme_font_size_override("font_size", 20)
+		var captured_id := id
+		if is_weapon:
+			btn.pressed.connect(_open_player_selector.bind(captured_id))
+		else:
+			btn.pressed.connect(_purchase.bind(captured_id, 0))
+		shop_layer.add_child(btn)
 
 func _open_player_selector(weapon_id: String) -> void:
 	# Overlay a small P1/P2 picker on top of the shop
@@ -1406,19 +1561,71 @@ func _get_shop_icon_path(id: String) -> String:
 
 func _build_shop_catalog() -> Dictionary:
 	return {
-		"core_repair":    {"name": "CORE REPAIR",     "desc": "Core HP +40",             "price": 20},
-		"mega_bomb":      {"name": "MEGA BOMB",        "desc": "Destroy all enemies",     "price": 35},
-		"crystal_magnet": {"name": "CRYSTAL MAGNET",  "desc": "Attract radius x3 (60s)", "price": 15},
-		"overclock":      {"name": "OVERCLOCK",        "desc": "Fire rate x1.5 (30s)",    "price": 30},
-		"emp_burst":      {"name": "EMP BURST",        "desc": "Stun all enemies (5s)",   "price": 25},
-		"side_cannon":    {"name": "SIDE CANNON",      "desc": "Fires side bullets",      "price": 25},
-		"spread_shot":    {"name": "SPREAD SHOT",      "desc": "3-way spread bullets",    "price": 30},
-		"homing_missile": {"name": "HOMING MISSILE",  "desc": "Tracking missile (2.5s)", "price": 45},
-		"twin_laser":     {"name": "TWIN LASER",       "desc": "2 parallel bullets",      "price": 60},
-		"auto_cannon":    {"name": "AUTO CANNON",      "desc": "Auto-shoots nearest foe", "price": 40},
-		"laser_tower":    {"name": "LASER TOWER",      "desc": "Continuous laser beam",   "price": 55},
-		"missile_pod":    {"name": "MISSILE POD",      "desc": "Homing missiles x3",      "price": 70},
-		"shield_wall":    {"name": "SHIELD WALL",      "desc": "Absorbs 1 hit per 8s",    "price": 35},
+		"core_repair": {
+			"name": "CORE REPAIR", "price": 20,
+			"short": "コアのHPを回復する",
+			"detail": "コアのHPを +40 回復します。\n\nHPが危険な状態のときに使うと\n生存率が大きく上がります。\n\n上限（CORE_HP_MAX）を\n超えては回復しません。",
+		},
+		"mega_bomb": {
+			"name": "MEGA BOMB", "price": 35,
+			"short": "画面上の全敵を一掃する",
+			"detail": "購入した瞬間、フィールド上に\n存在する全ての敵のHPを 0 に\nして即座に撃破します。\n\n窮地の切り札として有効です。\nクリスタルも大量にドロップします。",
+		},
+		"crystal_magnet": {
+			"name": "CRYSTAL MAGNET", "price": 15,
+			"short": "クリスタルの吸引範囲を3倍に",
+			"detail": "60秒間、クリスタルの自動吸引\n範囲が 120px → 360px に広がります。\n\n遠くに落ちたクリスタルも\n自動で集めてくれるため、\n序盤の資金集めに最適です。",
+		},
+		"overclock": {
+			"name": "OVERCLOCK", "price": 30,
+			"short": "射撃速度を30秒間1.5倍に",
+			"detail": "P1・P2 両機体の射撃速度を\n30秒間 1.5倍に強化します。\n\nRapid Fire アイテムと\n組み合わせることで\nさらに高い連射が可能です。",
+		},
+		"emp_burst": {
+			"name": "EMP BURST", "price": 25,
+			"short": "全敵を5秒間スタンさせる",
+			"detail": "購入した瞬間、フィールド上の\n全ての敵の動きと攻撃を\n5秒間完全に停止させます。\n\nコアへの突撃を止めたいときや\nフュージョンを溜めたいときに。",
+		},
+		"side_cannon": {
+			"name": "SIDE CANNON", "price": 25,
+			"short": "左右に追加弾を発射",
+			"detail": "通常ショットに加えて、\n左右斜め方向に弾を 各1発\n同時に発射します。\n\n横から迫る敵に対して\n自動で対応できます。\n\n装備スロット: 1機体につき1種",
+		},
+		"spread_shot": {
+			"name": "SPREAD SHOT", "price": 30,
+			"short": "左右25°に追加弾2発",
+			"detail": "通常ショットに加えて、\n左右 25° に広がる弾を\n各1発発射します（計2発追加）。\n\n広い範囲をカバーでき、\n複数の敵が並んでいるときに\n特に効果的です。\n\n装備スロット: 1機体につき1種",
+		},
+		"homing_missile": {
+			"name": "HOMING MISSILE", "price": 45,
+			"short": "2.5秒ごとに追尾ミサイルを発射",
+			"detail": "2.5秒ごとに、フィールド上で\n最も近い敵へ自動追尾する\nミサイルを発射します。\n\n操作は不要で完全自動です。\nタンク・エリートなど\n硬い敵に特に有効です。\n\n装備スロット: 1機体につき1種",
+		},
+		"twin_laser": {
+			"name": "TWIN LASER", "price": 60,
+			"short": "平行した2本の追加レーザー",
+			"detail": "通常ショットに加えて、\n機体の左右から平行した\nレーザー弾を各1発追加発射。\n\nダメージは通常弾と同等で、\n正面の敵に対する\n実質的な火力が大幅に向上します。\n\n装備スロット: 1機体につき1種",
+		},
+		"auto_cannon": {
+			"name": "AUTO CANNON", "price": 40,
+			"short": "最寄りの敵に1.2秒ごと射撃",
+			"detail": "コア周囲に砲台を1基設置します。\n\n1.2秒ごとに、フィールド上で\n最も近い敵へ自動的に弾を\n発射し続けます。\n\n操作不要で常時稼働する\n最もバランスの良いタレットです。\n\n最大設置数: 3基",
+		},
+		"laser_tower": {
+			"name": "LASER TOWER", "price": 55,
+			"short": "連続レーザーで即時ダメージ",
+			"detail": "コア周囲にレーザー砲台を設置。\n\n0.08秒ごとに最寄りの敵へ\n連続ダメージを与えます。\n射撃間隔が非常に短く、\n高速の敵も逃さず撃ち続けます。\n\nスカウト・アタッカーなど\n素早い敵の処理に最適です。\n\n最大設置数: 3基",
+		},
+		"missile_pod": {
+			"name": "MISSILE POD", "price": 70,
+			"short": "3.5秒ごとに敵3体へミサイル",
+			"detail": "コア周囲にミサイルポッドを設置。\n\n3.5秒ごとに、近くの敵 3体を\n同時に追尾するミサイルを\n一斉発射します。\n\n範囲攻撃に近い効果があり、\n複数のタンクやエリートが\n同時に来る場面で力を発揮します。\n\n最大設置数: 3基",
+		},
+		"shield_wall": {
+			"name": "SHIELD WALL", "price": 35,
+			"short": "コアに近い敵を8秒に1回弾く",
+			"detail": "コア周囲に防壁ユニットを設置。\n\n8秒に1回、コアに200px以内に\n近づいた敵を自動的に弾き飛ばします。\n\nダメージは与えませんが、\n敵の突撃をリセットする\n防衛的なタレットです。\nCore Repairと組み合わせると効果的。\n\n最大設置数: 3基",
+		},
 	}
 
 # ── Shop HUD button ──────────────────────────────────────────────────────────
