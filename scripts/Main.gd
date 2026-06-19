@@ -1201,7 +1201,7 @@ func _rebuild_shop_ui() -> void:
 	var tab_gap := 10.0
 	var tx := tab_x
 	for ti in range(3):
-		var tw := tab_widths[ti]
+		var tw: float = tab_widths[ti]
 		var is_active := ti == shop_page
 		var tab_bg := ColorRect.new()
 		tab_bg.position = Vector2(tx, tab_y)
