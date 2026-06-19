@@ -1172,6 +1172,7 @@ func _setup_fusion_flash() -> void:
 	fusion_flash_rect.position = Vector2.ZERO
 	fusion_flash_rect.size = screen_size
 	fusion_flash_rect.color = Color(0.5, 0.9, 1.0, 0.0)
+	fusion_flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	flash_layer.add_child(fusion_flash_rect)
 
 	var bar_layer := CanvasLayer.new()
