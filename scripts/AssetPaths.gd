@@ -144,6 +144,11 @@ static func resolve_path(primary: String, fallback: String = "") -> String:
 static func load_texture(path: String, placeholder_color: Color = Color(1, 1, 1, 1), placeholder_size: Vector2i = Vector2i(96, 96)) -> Texture2D:
 	if ResourceLoader.exists(path):
 		return load(path)
+	# .import ファイルがない場合でも直接 PNG を読み込む（エディタ実行時）
+	var abs_path := ProjectSettings.globalize_path(path)
+	var image := Image.new()
+	if image.load(abs_path) == OK:
+		return ImageTexture.create_from_image(image)
 	return make_placeholder_texture(placeholder_size, placeholder_color)
 
 static func make_placeholder_texture(size: Vector2i, color: Color) -> Texture2D:
