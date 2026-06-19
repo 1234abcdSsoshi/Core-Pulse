@@ -167,6 +167,22 @@ var story_bomb_explosion_radius := 185.0
 var story_bomb_fuse_time := 3.0
 var story_bomb_strong_damage := 55
 
+# Crystal & shop system
+var crystals := 0
+var crystal_objects: Array[Dictionary] = []
+var crystal_magnet_timer := 0.0
+var shop_active := false
+var shop_layer: CanvasLayer
+var hud_crystal_label: Label
+var shop_notify_ring: ColorRect
+var p1_weapon: String = ""
+var p2_weapon: String = ""
+var p1_weapon_cd := 0.0
+var p2_weapon_cd := 0.0
+var missiles: Array[Dictionary] = []
+var turrets: Array[Dictionary] = []
+var max_turrets := 3
+var emp_stun_timer := 0.0
 
 # Astral Court
 var arena_time := 60.0
@@ -262,6 +278,21 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
+			if key_event.keycode == KEY_TAB:
+				if mode == GameMode.STORY and not game_over:
+					if shop_active:
+						_close_shop()
+					else:
+						_open_shop()
+					get_viewport().set_input_as_handled()
+				return
+
+			if shop_active:
+				if key_event.keycode == KEY_ESCAPE:
+					_close_shop()
+					get_viewport().set_input_as_handled()
+				return
+
 			if key_event.keycode == KEY_F6:
 				_print_network_input_debug()
 				get_viewport().set_input_as_handled()
@@ -322,7 +353,7 @@ func _process(delta: float) -> void:
 		_handle_title_input()
 		return
 
-	if paused:
+	if paused or shop_active:
 		return
 
 	shoot_cd_p1 = maxf(0.0, shoot_cd_p1 - delta)
@@ -335,6 +366,10 @@ func _process(delta: float) -> void:
 	_update_items(delta)
 	_update_bombs(delta)
 	_update_effects(delta)
+	if mode == GameMode.STORY:
+		_update_crystals(delta)
+		_update_missiles(delta)
+		_update_turrets(delta)
 
 	# Stage-specific update now goes through the active stage controller.
 	# This replaces the previous match statement:
@@ -897,6 +932,8 @@ func _setup_ui() -> void:
 	_setup_result_buttons()
 	_setup_pause_menu()
 	_setup_fusion_flash()
+	_setup_shop_ui()
+	_setup_shop_hud_button()
 
 func _setup_pause_menu() -> void:
 	pause_layer = CanvasLayer.new()
@@ -968,9 +1005,76 @@ func _on_pause_home_pressed() -> void:
 		_clear_game_objects()
 		_show_title()
 
-# ── Wave upgrade system ──────────────────────────────────────────────────────
+# ── Crystal system ───────────────────────────────────────────────────────────
 
-# ── Enemy drop ───────────────────────────────────────────────────────────────
+func _spawn_crystals_from_enemy(pos: Vector2, kind: String) -> void:
+	var counts := {"scout": [1, 1], "attacker": [2, 3], "tank": [5, 7], "elite": [7, 10]}
+	var range_arr: Array = counts.get(kind, [1, 2])
+	var count := rng.randi_range(int(range_arr[0]), int(range_arr[1]))
+	for i in range(count):
+		var offset := Vector2(rng.randf_range(-28.0, 28.0), rng.randf_range(-28.0, 28.0))
+		var cpos := pos + offset
+		var sprite := AssetPaths.create_sprite(AssetPaths.ITEMS["crystal"], Vector2(28, 28), Color(0.3, 0.9, 1.0), 12)
+		sprite.position = cpos
+		add_child(sprite)
+		crystal_objects.append({"pos": cpos, "sprite": sprite, "lifetime": 5.0, "attracting": false})
+
+func _update_crystals(delta: float) -> void:
+	if crystal_magnet_timer > 0.0:
+		crystal_magnet_timer -= delta
+	var attract_radius := 360.0 if crystal_magnet_timer > 0.0 else 120.0
+	for i in range(crystal_objects.size() - 1, -1, -1):
+		var c: Dictionary = crystal_objects[i]
+		c["lifetime"] = float(c["lifetime"]) - delta
+		if float(c["lifetime"]) <= 0.0:
+			if is_instance_valid(c["sprite"]):
+				(c["sprite"] as Sprite2D).queue_free()
+			crystal_objects.remove_at(i)
+			continue
+		var cpos: Vector2 = c["pos"]
+		var nearest_dist := INF
+		var nearest_player_pos := Vector2.ZERO
+		for p in players:
+			if bool(p.get("alive", true)):
+				var d := cpos.distance_to(p["pos"] as Vector2)
+				if d < nearest_dist:
+					nearest_dist = d
+					nearest_player_pos = p["pos"]
+		if nearest_dist < attract_radius:
+			c["attracting"] = true
+		if bool(c["attracting"]):
+			var dir := (nearest_player_pos - cpos).normalized()
+			cpos += dir * 480.0 * delta
+			c["pos"] = cpos
+			(c["sprite"] as Sprite2D).position = cpos
+			if nearest_dist < 24.0:
+				crystals += 1
+				_update_hud_crystal_label()
+				_check_shop_notify()
+				if is_instance_valid(c["sprite"]):
+					(c["sprite"] as Sprite2D).queue_free()
+				crystal_objects.remove_at(i)
+				if audio_manager != null:
+					audio_manager.play_sfx("item_pickup", -10.0)
+
+func _update_hud_crystal_label() -> void:
+	if hud_crystal_label != null:
+		hud_crystal_label.text = "💎 %d" % crystals
+
+func _check_shop_notify() -> void:
+	if shop_notify_ring == null:
+		return
+	var affordable := _has_affordable_item()
+	shop_notify_ring.visible = affordable
+
+func _has_affordable_item() -> bool:
+	var prices := [20, 25, 15, 30, 25, 25, 30, 45, 60, 40, 55, 70, 35]
+	for price in prices:
+		if crystals >= price:
+			return true
+	return false
+
+# ── Enemy drop (legacy items — kept for heal/rapid_fire field drops) ──────────
 
 func _spawn_enemy_drop(pos: Vector2) -> void:
 	var pool: Array[String] = ["heal", "heal", "rapid_fire", "shield", "power_boost"]
@@ -1015,6 +1119,549 @@ func _setup_fusion_flash() -> void:
 	bar_label.add_theme_color_override("font_color", Color(0.2, 1.0, 0.85))
 	bar_label.visible = false
 	bar_layer.add_child(bar_label)
+
+# ── Shop system ──────────────────────────────────────────────────────────────
+
+func _setup_shop_ui() -> void:
+	shop_layer = CanvasLayer.new()
+	shop_layer.layer = 45
+	shop_layer.visible = false
+	shop_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(shop_layer)
+
+func _open_shop() -> void:
+	if game_over or mode == GameMode.TITLE:
+		return
+	shop_active = true
+	shop_layer.visible = true
+	_rebuild_shop_ui()
+	if audio_manager != null:
+		audio_manager.pause_bgm()
+
+func _close_shop() -> void:
+	shop_active = false
+	shop_layer.visible = false
+	if audio_manager != null:
+		audio_manager.resume_bgm()
+
+func _rebuild_shop_ui() -> void:
+	for child in shop_layer.get_children():
+		child.queue_free()
+
+	# dim
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.size = screen_size
+	dim.color = Color(0, 0, 0, 0.82)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	shop_layer.add_child(dim)
+
+	# title
+	var title := Label.new()
+	title.text = "CRYSTAL  SHOP"
+	title.position = Vector2(0, 28)
+	title.size = Vector2(screen_size.x, 70)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 58)
+	title.add_theme_color_override("font_color", Color(0.2, 0.95, 1.0))
+	shop_layer.add_child(title)
+
+	# crystal counter
+	var clbl := Label.new()
+	clbl.text = "💎 %d" % crystals
+	clbl.position = Vector2(screen_size.x - 260, 38)
+	clbl.size = Vector2(240, 50)
+	clbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	clbl.add_theme_font_size_override("font_size", 36)
+	clbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.9))
+	shop_layer.add_child(clbl)
+
+	# close hint
+	var hint := Label.new()
+	hint.text = "Tab / ESC  to close"
+	hint.position = Vector2(0, screen_size.y - 52)
+	hint.size = Vector2(screen_size.x, 40)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 26)
+	hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	shop_layer.add_child(hint)
+
+	var shop_catalog := _build_shop_catalog()
+	var sections := [
+		{"label": "ITEMS",   "color": Color(0.2, 1.0, 0.5),  "ids": ["core_repair", "mega_bomb", "crystal_magnet", "overclock", "emp_burst"]},
+		{"label": "WEAPONS", "color": Color(0.2, 0.8, 1.0),  "ids": ["side_cannon", "spread_shot", "homing_missile", "twin_laser"]},
+		{"label": "TURRETS", "color": Color(1.0, 0.55, 0.2), "ids": ["auto_cannon", "laser_tower", "missile_pod", "shield_wall"]},
+	]
+
+	var section_y := 115.0
+	for sec in sections:
+		var sec_label := Label.new()
+		sec_label.text = String(sec["label"])
+		sec_label.position = Vector2(40, section_y)
+		sec_label.size = Vector2(200, 44)
+		sec_label.add_theme_font_size_override("font_size", 30)
+		sec_label.add_theme_color_override("font_color", sec["color"] as Color)
+		shop_layer.add_child(sec_label)
+
+		var ids: Array = sec["ids"]
+		var card_w := 220.0
+		var card_h := 260.0
+		var gap := 24.0
+		var start_x := 240.0
+
+		for ci in range(ids.size()):
+			var id: String = ids[ci]
+			var info: Dictionary = shop_catalog[id]
+			var cx := start_x + ci * (card_w + gap)
+			var cy := section_y
+
+			var can_buy := crystals >= int(info["price"])
+			var bg := ColorRect.new()
+			bg.position = Vector2(cx, cy)
+			bg.size = Vector2(card_w, card_h)
+			bg.color = Color(0.05, 0.08, 0.16, 0.95) if can_buy else Color(0.04, 0.05, 0.09, 0.95)
+			bg.mouse_filter = Control.MOUSE_FILTER_STOP
+			shop_layer.add_child(bg)
+
+			var accent: Color = sec["color"]
+			var border := ColorRect.new()
+			border.position = Vector2(cx, cy)
+			border.size = Vector2(card_w, 3)
+			border.color = accent if can_buy else Color(accent.r * 0.4, accent.g * 0.4, accent.b * 0.4)
+			shop_layer.add_child(border)
+
+			# icon
+			var icon_path := _get_shop_icon_path(id)
+			if icon_path != "":
+				var icon_sprite := AssetPaths.create_sprite(icon_path, Vector2(72, 72), Color(0.5, 0.5, 0.5))
+				icon_sprite.position = Vector2(cx + card_w * 0.5, cy + 50)
+				icon_sprite.z_index = 46
+				shop_layer.add_child(icon_sprite)
+
+			var name_lbl := Label.new()
+			name_lbl.text = String(info["name"])
+			name_lbl.position = Vector2(cx + 4, cy + 96)
+			name_lbl.size = Vector2(card_w - 8, 44)
+			name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			name_lbl.add_theme_font_size_override("font_size", 20)
+			name_lbl.add_theme_color_override("font_color", accent if can_buy else Color(0.4, 0.45, 0.5))
+			shop_layer.add_child(name_lbl)
+
+			var desc_lbl := Label.new()
+			desc_lbl.text = String(info["desc"])
+			desc_lbl.position = Vector2(cx + 6, cy + 140)
+			desc_lbl.size = Vector2(card_w - 12, 70)
+			desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			desc_lbl.add_theme_font_size_override("font_size", 16)
+			desc_lbl.add_theme_color_override("font_color", Color(0.75, 0.82, 0.9) if can_buy else Color(0.35, 0.38, 0.42))
+			shop_layer.add_child(desc_lbl)
+
+			var price_lbl := Label.new()
+			price_lbl.text = "💎 %d" % int(info["price"])
+			price_lbl.position = Vector2(cx, cy + card_h - 52)
+			price_lbl.size = Vector2(card_w, 30)
+			price_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			price_lbl.add_theme_font_size_override("font_size", 22)
+			price_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.6) if can_buy else Color(0.4, 0.4, 0.4))
+			shop_layer.add_child(price_lbl)
+
+			if can_buy:
+				var btn := Button.new()
+				btn.text = "BUY"
+				btn.position = Vector2(cx + 30, cy + card_h - 38)
+				btn.size = Vector2(card_w - 60, 32)
+				btn.add_theme_font_size_override("font_size", 18)
+				var captured_id := id
+				var is_weapon := String(sec["label"]) == "WEAPONS"
+				if is_weapon:
+					btn.pressed.connect(_open_player_selector.bind(captured_id))
+				else:
+					btn.pressed.connect(_purchase.bind(captured_id, 0))
+				shop_layer.add_child(btn)
+
+		section_y += card_h + 52.0
+
+func _open_player_selector(weapon_id: String) -> void:
+	# Overlay a small P1/P2 picker on top of the shop
+	var overlay := ColorRect.new()
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.size = screen_size
+	overlay.color = Color(0, 0, 0, 0.6)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.z_index = 10
+	shop_layer.add_child(overlay)
+
+	var panel := ColorRect.new()
+	panel.position = Vector2(screen_size.x * 0.5 - 220, screen_size.y * 0.5 - 130)
+	panel.size = Vector2(440, 260)
+	panel.color = Color(0.05, 0.09, 0.18, 0.98)
+	panel.z_index = 11
+	shop_layer.add_child(panel)
+
+	var ask := Label.new()
+	ask.text = "Equip to which player?"
+	ask.position = Vector2(panel.position.x, panel.position.y + 20)
+	ask.size = Vector2(440, 50)
+	ask.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ask.add_theme_font_size_override("font_size", 28)
+	ask.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+	ask.z_index = 12
+	shop_layer.add_child(ask)
+
+	var p1_btn := Button.new()
+	p1_btn.text = "P1  Azure Wing"
+	p1_btn.position = Vector2(panel.position.x + 30, panel.position.y + 90)
+	p1_btn.size = Vector2(170, 50)
+	p1_btn.add_theme_font_size_override("font_size", 20)
+	p1_btn.add_theme_color_override("font_color", Color(0.3, 0.8, 1.0))
+	p1_btn.z_index = 12
+	p1_btn.pressed.connect(_purchase.bind(weapon_id, 1))
+	p1_btn.pressed.connect(overlay.queue_free)
+	p1_btn.pressed.connect(panel.queue_free)
+	p1_btn.pressed.connect(ask.queue_free)
+	p1_btn.pressed.connect(p1_btn.queue_free)
+	shop_layer.add_child(p1_btn)
+
+	var p2_btn := Button.new()
+	p2_btn.text = "P2  Solar Fang"
+	p2_btn.position = Vector2(panel.position.x + 240, panel.position.y + 90)
+	p2_btn.size = Vector2(170, 50)
+	p2_btn.add_theme_font_size_override("font_size", 20)
+	p2_btn.add_theme_color_override("font_color", Color(1.0, 0.7, 0.2))
+	p2_btn.z_index = 12
+	p2_btn.pressed.connect(_purchase.bind(weapon_id, 2))
+	p2_btn.pressed.connect(overlay.queue_free)
+	p2_btn.pressed.connect(panel.queue_free)
+	p2_btn.pressed.connect(ask.queue_free)
+	p2_btn.pressed.connect(p2_btn.queue_free)
+	shop_layer.add_child(p2_btn)
+
+	var cancel_btn := Button.new()
+	cancel_btn.text = "Cancel"
+	cancel_btn.position = Vector2(panel.position.x + 130, panel.position.y + 180)
+	cancel_btn.size = Vector2(180, 40)
+	cancel_btn.add_theme_font_size_override("font_size", 18)
+	cancel_btn.z_index = 12
+	cancel_btn.pressed.connect(overlay.queue_free)
+	cancel_btn.pressed.connect(panel.queue_free)
+	cancel_btn.pressed.connect(ask.queue_free)
+	cancel_btn.pressed.connect(cancel_btn.queue_free)
+	shop_layer.add_child(cancel_btn)
+
+func _purchase(id: String, player_target: int) -> void:
+	var catalog := _build_shop_catalog()
+	if not catalog.has(id):
+		return
+	var price := int(catalog[id]["price"])
+	if crystals < price:
+		return
+	crystals -= price
+	_update_hud_crystal_label()
+	_check_shop_notify()
+	match id:
+		"core_repair":
+			base_hp = min(100, base_hp + 40)
+		"mega_bomb":
+			for e in enemies:
+				e["hp"] = 0
+		"crystal_magnet":
+			crystal_magnet_timer = 60.0
+		"overclock":
+			for p in players:
+				p["rapid"] = maxf(float(p.get("rapid", 0.0)), 30.0)
+		"emp_burst":
+			emp_stun_timer = 5.0
+		"side_cannon", "spread_shot", "homing_missile", "twin_laser":
+			if player_target == 1:
+				p1_weapon = id
+			elif player_target == 2:
+				p2_weapon = id
+		"auto_cannon", "laser_tower", "missile_pod", "shield_wall":
+			if turrets.size() < max_turrets:
+				_add_turret(id)
+	_rebuild_shop_ui()
+
+func _get_shop_icon_path(id: String) -> String:
+	match id:
+		"core_repair":     return AssetPaths.ITEMS["heal"]
+		"mega_bomb":       return AssetPaths.ITEMS["bomb"]
+		"crystal_magnet":  return AssetPaths.ITEMS["crystal_magnet"]
+		"overclock":       return AssetPaths.ITEMS["rapid_fire"]
+		"emp_burst":       return AssetPaths.ITEMS["emp_burst"]
+		"side_cannon":     return AssetPaths.WEAPONS["side_cannon"]
+		"spread_shot":     return AssetPaths.WEAPONS["spread_shot"]
+		"homing_missile":  return AssetPaths.WEAPONS["homing_missile"]
+		"twin_laser":      return AssetPaths.WEAPONS["twin_laser"]
+		"auto_cannon":     return AssetPaths.TURRETS["auto_cannon"]
+		"laser_tower":     return AssetPaths.TURRETS["laser_tower"]
+		"missile_pod":     return AssetPaths.TURRETS["missile_pod"]
+		"shield_wall":     return AssetPaths.TURRETS["shield_wall"]
+	return ""
+
+func _build_shop_catalog() -> Dictionary:
+	return {
+		"core_repair":    {"name": "CORE REPAIR",     "desc": "Core HP +40",             "price": 20},
+		"mega_bomb":      {"name": "MEGA BOMB",        "desc": "Destroy all enemies",     "price": 35},
+		"crystal_magnet": {"name": "CRYSTAL MAGNET",  "desc": "Attract radius x3 (60s)", "price": 15},
+		"overclock":      {"name": "OVERCLOCK",        "desc": "Fire rate x1.5 (30s)",    "price": 30},
+		"emp_burst":      {"name": "EMP BURST",        "desc": "Stun all enemies (5s)",   "price": 25},
+		"side_cannon":    {"name": "SIDE CANNON",      "desc": "Fires side bullets",      "price": 25},
+		"spread_shot":    {"name": "SPREAD SHOT",      "desc": "3-way spread bullets",    "price": 30},
+		"homing_missile": {"name": "HOMING MISSILE",  "desc": "Tracking missile (2.5s)", "price": 45},
+		"twin_laser":     {"name": "TWIN LASER",       "desc": "2 parallel bullets",      "price": 60},
+		"auto_cannon":    {"name": "AUTO CANNON",      "desc": "Auto-shoots nearest foe", "price": 40},
+		"laser_tower":    {"name": "LASER TOWER",      "desc": "Continuous laser beam",   "price": 55},
+		"missile_pod":    {"name": "MISSILE POD",      "desc": "Homing missiles x3",      "price": 70},
+		"shield_wall":    {"name": "SHIELD WALL",      "desc": "Absorbs 1 hit per 8s",    "price": 35},
+	}
+
+# ── Shop HUD button ──────────────────────────────────────────────────────────
+
+func _setup_shop_hud_button() -> void:
+	var hud_layer := CanvasLayer.new()
+	hud_layer.layer = 20
+	add_child(hud_layer)
+
+	# Crystal label
+	hud_crystal_label = Label.new()
+	hud_crystal_label.text = "💎 0"
+	hud_crystal_label.position = Vector2(screen_size.x - 260, 14)
+	hud_crystal_label.size = Vector2(140, 40)
+	hud_crystal_label.add_theme_font_size_override("font_size", 26)
+	hud_crystal_label.add_theme_color_override("font_color", Color(0.3, 0.95, 1.0))
+	hud_layer.add_child(hud_crystal_label)
+
+	# Shop button background
+	var btn_bg := ColorRect.new()
+	btn_bg.position = Vector2(screen_size.x - 112, 10)
+	btn_bg.size = Vector2(100, 44)
+	btn_bg.color = Color(0.05, 0.1, 0.22, 0.92)
+	btn_bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	hud_layer.add_child(btn_bg)
+
+	# Notify glow ring (visible when items are affordable)
+	shop_notify_ring = ColorRect.new()
+	shop_notify_ring.position = Vector2(screen_size.x - 114, 8)
+	shop_notify_ring.size = Vector2(104, 48)
+	shop_notify_ring.color = Color(0.2, 1.0, 0.6, 0.45)
+	shop_notify_ring.visible = false
+	hud_layer.add_child(shop_notify_ring)
+
+	# Shop icon
+	var shop_icon := AssetPaths.create_sprite(AssetPaths.UI["shop"], Vector2(32, 32), Color(0.3, 0.9, 1.0))
+	shop_icon.position = Vector2(screen_size.x - 100, 32)
+	shop_icon.z_index = 21
+	hud_layer.add_child(shop_icon)
+
+	# Shop label
+	var shop_lbl := Label.new()
+	shop_lbl.text = "SHOP"
+	shop_lbl.position = Vector2(screen_size.x - 78, 18)
+	shop_lbl.size = Vector2(70, 28)
+	shop_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	shop_lbl.add_theme_font_size_override("font_size", 20)
+	shop_lbl.add_theme_color_override("font_color", Color(0.5, 0.9, 1.0))
+	hud_layer.add_child(shop_lbl)
+
+	# Invisible clickable button over the shop area
+	var shop_btn := Button.new()
+	shop_btn.position = Vector2(screen_size.x - 114, 8)
+	shop_btn.size = Vector2(104, 48)
+	shop_btn.flat = true
+	shop_btn.modulate = Color(1, 1, 1, 0)
+	shop_btn.pressed.connect(_open_shop)
+	hud_layer.add_child(shop_btn)
+
+	# Key hint
+	var key_hint := Label.new()
+	key_hint.text = "[Tab]"
+	key_hint.position = Vector2(screen_size.x - 116, 54)
+	key_hint.size = Vector2(108, 24)
+	key_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	key_hint.add_theme_font_size_override("font_size", 14)
+	key_hint.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
+	hud_layer.add_child(key_hint)
+
+# ── Weapon fire helpers ───────────────────────────────────────────────────────
+
+func _fire_weapon_extra(player_id: int, base_pos: Vector2, base_vel: Vector2) -> void:
+	var weapon := p1_weapon if player_id == 1 else p2_weapon
+	if weapon == "":
+		return
+	var p_dict: Dictionary = {}
+	for p in players:
+		if int(p["id"]) == player_id:
+			p_dict = p
+			break
+	var dmg := int(p_dict.get("damage", 8))
+	var spd := float(p_dict.get("shot_speed", 1000.0))
+	match weapon:
+		"side_cannon":
+			var left_vel := Vector2(-spd * 0.7, -spd * 0.7).normalized() * spd
+			var right_vel := Vector2(spd * 0.7, -spd * 0.7).normalized() * spd
+			_create_extra_bullet(player_id, base_pos + Vector2(-30, 0), left_vel, dmg, Color(0.3, 0.7, 1.0))
+			_create_extra_bullet(player_id, base_pos + Vector2(30, 0), right_vel, dmg, Color(0.3, 0.7, 1.0))
+		"spread_shot":
+			for angle_deg in [-25.0, 25.0]:
+				var rotated_vel := base_vel.rotated(deg_to_rad(angle_deg))
+				_create_extra_bullet(player_id, base_pos, rotated_vel, dmg, Color(0.7, 0.4, 1.0))
+		"twin_laser":
+			_create_extra_bullet(player_id, base_pos + Vector2(-18, 0), base_vel, dmg, Color(0.2, 1.0, 0.85))
+			_create_extra_bullet(player_id, base_pos + Vector2(18, 0), base_vel, dmg, Color(0.2, 1.0, 0.85))
+
+func _create_extra_bullet(player_id: int, pos: Vector2, vel: Vector2, dmg: int, col: Color) -> void:
+	var sprite := Sprite2D.new()
+	var img := Image.create(14, 14, false, Image.FORMAT_RGBA8)
+	img.fill(col)
+	sprite.texture = ImageTexture.create_from_image(img)
+	sprite.position = pos
+	sprite.rotation = vel.angle() + PI / 2
+	sprite.z_index = 10
+	add_child(sprite)
+	bullets.append({"pos": pos, "vel": vel, "owner": player_id, "damage": dmg,
+		"sprite": sprite, "radius": 7.0, "piercing": false})
+
+# ── Missile update ────────────────────────────────────────────────────────────
+
+func _update_missiles(delta: float) -> void:
+	p1_weapon_cd = maxf(0.0, p1_weapon_cd - delta)
+	p2_weapon_cd = maxf(0.0, p2_weapon_cd - delta)
+
+	for pid in [1, 2]:
+		var weapon := p1_weapon if pid == 1 else p2_weapon
+		if weapon != "homing_missile":
+			continue
+		var cd := p1_weapon_cd if pid == 1 else p2_weapon_cd
+		if cd > 0.0:
+			continue
+		if pid == 1:
+			p1_weapon_cd = 2.5
+		else:
+			p2_weapon_cd = 2.5
+		var p_pos := Vector2.ZERO
+		for p in players:
+			if int(p["id"]) == pid:
+				p_pos = p["pos"]
+				break
+		if p_pos == Vector2.ZERO:
+			continue
+		var nearest_enemy := _find_nearest_enemy(p_pos)
+		var target_pos := nearest_enemy if nearest_enemy != Vector2.ZERO else p_pos + Vector2.UP * 300
+		var vel := (target_pos - p_pos).normalized() * 600.0
+		var ms := Sprite2D.new()
+		var img := Image.create(10, 18, false, Image.FORMAT_RGBA8)
+		img.fill(Color(1.0, 0.6, 0.2))
+		ms.texture = ImageTexture.create_from_image(img)
+		ms.position = p_pos
+		ms.z_index = 10
+		add_child(ms)
+		var dmg := 28 if pid == 1 else 40
+		missiles.append({"pos": p_pos, "vel": vel, "owner": pid, "sprite": ms,
+			"damage": dmg, "lifetime": 4.0})
+
+	for i in range(missiles.size() - 1, -1, -1):
+		var m: Dictionary = missiles[i]
+		m["lifetime"] = float(m["lifetime"]) - delta
+		if float(m["lifetime"]) <= 0.0:
+			if is_instance_valid(m["sprite"]):
+				(m["sprite"] as Sprite2D).queue_free()
+			missiles.remove_at(i)
+			continue
+		var mpos: Vector2 = m["pos"]
+		var target := _find_nearest_enemy(mpos)
+		if target != Vector2.ZERO:
+			var desired := (target - mpos).normalized() * 700.0
+			var cur_vel: Vector2 = m["vel"]
+			m["vel"] = cur_vel.lerp(desired, 3.0 * delta)
+		mpos += (m["vel"] as Vector2) * delta
+		m["pos"] = mpos
+		(m["sprite"] as Sprite2D).position = mpos
+		(m["sprite"] as Sprite2D).rotation = (m["vel"] as Vector2).angle() + PI / 2
+		for j in range(enemies.size() - 1, -1, -1):
+			var e: Dictionary = enemies[j]
+			if mpos.distance_to(e["pos"] as Vector2) < 40.0:
+				e["hp"] = int(e["hp"]) - int(m["damage"])
+				_spawn_effect(AssetPaths.EFFECTS["explosion_small"], mpos, Vector2(80, 80), 0.25)
+				if is_instance_valid(m["sprite"]):
+					(m["sprite"] as Sprite2D).queue_free()
+				missiles.remove_at(i)
+				break
+
+func _find_nearest_enemy(from_pos: Vector2) -> Vector2:
+	var best := INF
+	var result := Vector2.ZERO
+	for e in enemies:
+		var d := from_pos.distance_to(e["pos"] as Vector2)
+		if d < best:
+			best = d
+			result = e["pos"]
+	return result
+
+# ── Turret system ─────────────────────────────────────────────────────────────
+
+func _add_turret(kind: String) -> void:
+	var angle := (turrets.size() * 120.0) * PI / 180.0
+	var radius := 130.0
+	var offset := Vector2(cos(angle), sin(angle)) * radius
+	var tpos := base_sprite.position + offset
+	var sprite := AssetPaths.create_sprite(_get_shop_icon_path(kind), Vector2(52, 52), Color(0.6, 0.8, 1.0), 9)
+	sprite.position = tpos
+	add_child(sprite)
+	turrets.append({"kind": kind, "pos": tpos, "sprite": sprite,
+		"timer": 0.0, "shield_cd": 0.0, "shield_active": false})
+
+func _update_turrets(delta: float) -> void:
+	if emp_stun_timer > 0.0:
+		emp_stun_timer -= delta
+	for turret in turrets:
+		turret["timer"] = float(turret["timer"]) + delta
+		var kind: String = turret["kind"]
+		var tpos: Vector2 = turret["pos"]
+		match kind:
+			"auto_cannon":
+				if float(turret["timer"]) >= 1.2:
+					turret["timer"] = 0.0
+					var target := _find_nearest_enemy(tpos)
+					if target != Vector2.ZERO:
+						var vel := (target - tpos).normalized() * 900.0
+						_create_extra_bullet(0, tpos, vel, 18, Color(0.5, 0.8, 1.0))
+			"laser_tower":
+				if float(turret["timer"]) >= 0.08:
+					turret["timer"] = 0.0
+					var target := _find_nearest_enemy(tpos)
+					if target != Vector2.ZERO:
+						for e in enemies:
+							if (e["pos"] as Vector2).distance_to(target) < 60.0:
+								e["hp"] = int(e["hp"]) - 6
+			"missile_pod":
+				if float(turret["timer"]) >= 3.5:
+					turret["timer"] = 0.0
+					var sorted_enemies := enemies.duplicate()
+					sorted_enemies.sort_custom(func(a, b): return (a["pos"] as Vector2).distance_to(tpos) < (b["pos"] as Vector2).distance_to(tpos))
+					for ei in range(min(3, sorted_enemies.size())):
+						var target_pos: Vector2 = sorted_enemies[ei]["pos"]
+						var vel := (target_pos - tpos).normalized() * 620.0
+						var ms := Sprite2D.new()
+						var img := Image.create(8, 16, false, Image.FORMAT_RGBA8)
+						img.fill(Color(1.0, 0.55, 0.1))
+						ms.texture = ImageTexture.create_from_image(img)
+						ms.position = tpos
+						ms.z_index = 10
+						add_child(ms)
+						missiles.append({"pos": tpos, "vel": vel, "owner": 0, "sprite": ms,
+							"damage": 22, "lifetime": 4.0})
+			"shield_wall":
+				turret["shield_cd"] = float(turret.get("shield_cd", 0.0)) + delta
+				if float(turret["shield_cd"]) >= 8.0:
+					turret["shield_cd"] = 0.0
+					turret["shield_active"] = true
+				if bool(turret.get("shield_active", false)):
+					for e in enemies:
+						if (e["pos"] as Vector2).distance_to(base_sprite.position) < 200.0:
+							e["pos"] = (e["pos"] as Vector2) + ((e["pos"] as Vector2) - base_sprite.position).normalized() * 40.0
+							turret["shield_active"] = false
+							break
 
 func _create_premium_button(text_value: String, position_value: Vector2, size_value: Vector2) -> Button:
 	# Creates a reusable premium-style button.
@@ -1660,6 +2307,27 @@ func _clear_game_objects() -> void:
 				obj["sprite"].queue_free()
 		arr.clear()
 
+	for c in crystal_objects:
+		if is_instance_valid(c["sprite"]):
+			(c["sprite"] as Sprite2D).queue_free()
+	crystal_objects.clear()
+	for m in missiles:
+		if is_instance_valid(m["sprite"]):
+			(m["sprite"] as Sprite2D).queue_free()
+	missiles.clear()
+	for t in turrets:
+		if is_instance_valid(t["sprite"]):
+			(t["sprite"] as Sprite2D).queue_free()
+	turrets.clear()
+	crystals = 0
+	p1_weapon = ""
+	p2_weapon = ""
+	p1_weapon_cd = 0.0
+	p2_weapon_cd = 0.0
+	crystal_magnet_timer = 0.0
+	emp_stun_timer = 0.0
+	_update_hud_crystal_label()
+
 	for weak in raid_weak_sprites:
 		weak.visible = false
 	for s in arena_obstacle_sprites:
@@ -1768,6 +2436,8 @@ func _shoot(player_id: int) -> void:
 	else:
 		var bullet: Dictionary = _create_bullet(origin + direction * 58.0, direction, player_id, damage, path, shot_speed, bullet_size, is_piercing)
 		bullets.append(bullet)
+
+	_fire_weapon_extra(player_id, origin, direction * shot_speed)
 
 	if audio_manager != null:
 		audio_manager.play_sfx("shot_azure" if player_id == 1 else "shot_solar", -8.0)
@@ -2200,6 +2870,7 @@ func _spawn_enemy() -> void:
 	enemies.append({"pos": pos, "hp": hp, "speed": speed, "sprite": sprite, "radius": 44.0, "kind": key})
 
 func _update_enemies(delta: float) -> void:
+	var stunned := emp_stun_timer > 0.0
 	for i in range(enemies.size() - 1, -1, -1):
 		var e: Dictionary = enemies[i]
 		var target: Vector2 = base_sprite.position
@@ -2207,7 +2878,8 @@ func _update_enemies(delta: float) -> void:
 			target = players[i % players.size()]["pos"]
 		var pos: Vector2 = e["pos"]
 		var dir := (target - pos).normalized()
-		pos += dir * float(e["speed"]) * delta
+		if not stunned:
+			pos += dir * float(e["speed"]) * delta
 		e["pos"] = pos
 		(e["sprite"] as Sprite2D).position = pos
 		if int(e["hp"]) <= 0:
@@ -2219,8 +2891,7 @@ func _update_enemies(delta: float) -> void:
 				(e["sprite"] as Sprite2D).queue_free()
 			enemies.remove_at(i)
 			if mode == GameMode.STORY:
-				if rng.randf() < 0.28:
-					_spawn_enemy_drop(pos)
+				_spawn_crystals_from_enemy(pos, String(e.get("kind", "scout")))
 		elif pos.y > screen_size.y + 100 or pos.distance_to(target) < 60.0:
 			if mode == GameMode.STORY and core_shield_time > 0.0:
 				core_shield_time = maxf(0.0, core_shield_time - 1.0)

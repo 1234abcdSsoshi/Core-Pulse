@@ -47,6 +47,23 @@ const ITEMS := {
 	"energy_core": "res://assets/items/item_energy_core.png",
 	"power_boost": "res://assets/items/item_power_boost.png",
 	"link_charge": "res://assets/items/item_link_charge.png",
+	"crystal": "res://assets/items/item_crystal.png",
+	"crystal_magnet": "res://assets/items/item_crystal_magnet.png",
+	"emp_burst": "res://assets/items/item_emp_burst.png",
+}
+
+const WEAPONS := {
+	"side_cannon":     "res://assets/weapons/weapon_side_cannon.png",
+	"spread_shot":     "res://assets/weapons/weapon_spread_shot.png",
+	"homing_missile":  "res://assets/weapons/weapon_homing_missile.png",
+	"twin_laser":      "res://assets/weapons/weapon_twin_laser.png",
+}
+
+const TURRETS := {
+	"auto_cannon":   "res://assets/turrets/turret_auto_cannon.png",
+	"laser_tower":   "res://assets/turrets/turret_laser_tower.png",
+	"missile_pod":   "res://assets/turrets/turret_missile_pod.png",
+	"shield_wall":   "res://assets/turrets/turret_shield_wall.png",
 }
 
 const BACKGROUNDS := {
@@ -67,6 +84,7 @@ const UI := {
 	"link": "res://assets/ui/ui_icon_link.png",
 	"boss_hp_back": "res://assets/ui/ui_bar_boss_hp_back.png",
 	"link_fill": "res://assets/ui/ui_bar_link_fill.png",
+	"shop": "res://assets/ui/ui_shop_icon.png",
 }
 
 
