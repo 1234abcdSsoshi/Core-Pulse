@@ -18,6 +18,11 @@ const RaidStageScript = preload("res://scenes/stages/RaidStage.gd")
 
 enum GameMode { TITLE, STORY, ASTRAL_COURT, RAID }
 
+# ── ゲームバランス設定 ────────────────────────────────────────────────────────
+# ここの値を変えるだけでバランス調整できます。
+const CORE_HP_MAX := 100       # コアの最大体力（Story Mode）
+# ─────────────────────────────────────────────────────────────────────────────
+
 var mode: GameMode = GameMode.TITLE
 
 # StageRoot is added to Main.tscn.
@@ -99,7 +104,7 @@ var bombs: Array[Dictionary] = []
 var team_score := 0
 var p1_score := 0
 var p2_score := 0
-var base_hp := 100
+var base_hp := CORE_HP_MAX
 var core_shield_time := 0.0
 var coop_link := 0.0
 var story_wave := 1
@@ -1361,7 +1366,7 @@ func _purchase(id: String, player_target: int) -> void:
 	_check_shop_notify()
 	match id:
 		"core_repair":
-			base_hp = min(100, base_hp + 40)
+			base_hp = min(CORE_HP_MAX, base_hp + 40)
 		"mega_bomb":
 			for e in enemies:
 				e["hp"] = 0
@@ -2182,7 +2187,7 @@ func _start_story() -> void:
 	team_score = 0
 	p1_score = 0
 	p2_score = 0
-	base_hp = 100
+	base_hp = CORE_HP_MAX
 	core_shield_time = 0.0
 	coop_link = 0.0
 	story_wave = 1
@@ -2943,7 +2948,7 @@ func _apply_item(key: String, p: Dictionary) -> void:
 
 	match key:
 		"heal":
-			base_hp = min(100, base_hp + 20)
+			base_hp = min(CORE_HP_MAX, base_hp + 20)
 			if audio_manager != null:
 				audio_manager.play_sfx("item_heal", -5.0)
 
