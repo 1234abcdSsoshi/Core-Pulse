@@ -1,72 +1,251 @@
-# Twin Core Blasters - V11 Design Fix
+# Twin Core Blasters
 
-Godot 4.x project with asset integration and gameplay/UI fixes.
+2人協力プレイの縦スクロールシューティングゲームです。
+P1「Azure Wing」とP2「Solar Fang」が協力してコアを守りながら敵を撃破します。
 
-## What changed in V11
+---
 
-### Stage 1: CO-OP DEFENSE restored
-- Stage 1 is now focused on cooperative play again.
-- Staying near your partner or both defending the core charges `CO-OP LINK`.
-- At 100%, press `G`, `K`, or `Space` to fire Twin Core Cannon and clear enemies.
+## 目次
 
-### Core shield redesigned
-- Shield items no longer attach shields to players.
-- Shield items now protect the central core.
-- The core shield absorbs enemy impact damage for a limited time.
+- [操作方法](#操作方法)
+- [ゲームモード](#ゲームモード)
+- [キャラクター性能](#キャラクター性能)
+- [アイテム一覧](#アイテム一覧)
+- [ウェーブシステムとアップグレード](#ウェーブシステムとアップグレード)
+- [フュージョンモード](#フュージョンモード)
+- [オンラインプレイ](#オンラインプレイ)
+- [サーバーの起動方法](#サーバーの起動方法)
+- [最近追加した機能](#最近追加した機能)
 
-### Stage 3: Eclipse Leviathan movement
-- The raid boss now moves horizontally and vertically.
-- Movement becomes stronger by phase.
-- Weak cores follow the moving boss.
+---
 
-### Game over UI redesigned
-- Added a dark overlay panel.
-- Result title and score are shown clearly at the center.
-- Press `R` to restart.
+## 操作方法
 
-## Controls
+### タイトル画面
 
-### Home
-- `1`: Story Mode
-- `2`: Astral Court
-- `3`: Eclipse Leviathan Raid
-- `Enter` / `Space`: Story Mode
+| キー | 操作 |
+|------|------|
+| `1` | Story Mode |
+| `2` | Astral Court |
+| `3` | Eclipse Leviathan Raid |
+| マウスクリック | 各ボタンで選択 |
 
-### P1
-- `WASD`: Move
-- `F`: Shoot
+### ゲームプレイ中（共通）
 
-### P2
-- Arrow keys: Move
-- `L`: Shoot
+| キー | 操作 |
+|------|------|
+| `ESC` | ポーズ / 再開 |
+| `R`（ゲームオーバー時） | リトライ |
 
-### Stage 1 CO-OP DEFENSE
-- `G` / `K` / `Space`: Twin Core Cannon when CO-OP LINK reaches 100%
+### P1（Azure Wing）
 
-### Astral Court
-- P1: `Q` Dash / `E` Shield / `G` Ultimate
-- P2: `O` Dash / `P` Shield / `K` Ultimate
+| キー | 操作 |
+|------|------|
+| `W` `A` `S` `D` | 移動 |
+| `F` | ショット |
 
-### Raid
-- `G` / `K`: Twin Core Cannon when Link is 100%
+### P2（Solar Fang）
 
-## Asset folder
-Place your generated image assets inside:
+| キー | 操作 |
+|------|------|
+| `↑` `←` `↓` `→` | 移動 |
+| `L` | ショット |
 
-```text
-assets/
-├── players/
-├── enemies/
-├── bosses/
-├── projectiles/
-├── effects/
-├── items/
-├── backgrounds/
-├── stages/
-└── ui/
+### フュージョン発動（Story Modeのみ）
+
+| キー | 操作 |
+|------|------|
+| `G` / `K` / `Space` | CO-OP LINK 100%時にフュージョン発動 |
+
+### フュージョン中の操作
+
+| キー | 操作 |
+|------|------|
+| `W` `A` `S` `D`（P1） | 照準ポインターを移動 |
+| `F`（P1） | フュージョンキャノン発射 |
+| `↑` `←` `↓` `→`（P2） | フュージョン艦体を移動 |
+| `L`（P2） | 爆弾を設置 |
+
+---
+
+## ゲームモード
+
+### Story Mode（ストーリーモード）
+
+- P1・P2 がコアを守りながら敵の波を乗り越えるCO-OPモード
+- 敵を一定数倒すごとにウェーブクリアとなりアップグレードを選択できる
+- コアのHPが0になるとゲームオーバー
+
+### Astral Court（アストラルコート）
+
+- P1 vs P2 の1対1対戦モード
+- 相手のHPを先にゼロにした方が勝ち
+
+### Eclipse Leviathan Raid（レイドモード）
+
+- 2人で巨大ボスに挑むレイドモード
+- ボスはフェーズごとに強化・移動パターンが変化する
+
+---
+
+## キャラクター性能
+
+### P1：Azure Wing（アジュールウィング）
+
+- **移動速度**：速い
+- **弾速**：高い
+- **射撃間隔**：短い（連射向き）
+- **弾のサイズ**：小さい精密弾
+- **1発あたりダメージ**：低め
+
+**アイテム効果（P1専用）**
+- Rapid Fire：超高速連射
+- Power Boost：貫通レーザー
+
+### P2：Solar Fang（ソーラーファング）
+
+- **移動速度**：遅い
+- **弾速**：低い
+- **射撃間隔**：長い（重火力向き）
+- **弾のサイズ**：大きい重弾
+- **1発あたりダメージ**：高い
+
+**アイテム効果（P2専用）**
+- Rapid Fire：3連バースト射撃
+- Power Boost：巨大重弾
+
+---
+
+## アイテム一覧
+
+フィールドには2種類のアイテムが出現します：
+
+- **緑色**：時間経過で自動スポーン
+- **金色**：敵を撃破した際に一定確率でドロップ
+
+| アイテム | 効果 |
+|---------|------|
+| Heal | コアHP +20 回復 |
+| Rapid Fire | 一定時間、射撃速度が上昇 |
+| Shield | コアをダメージから保護（時間制） |
+| Power Boost | 一定時間、強化弾を発射 |
+| Link Charge | CO-OPリンクゲージを大幅補充 |
+
+> Link Chargeの出現率は他アイテムより低めに調整されています。
+
+---
+
+## ウェーブシステムとアップグレード
+
+Story Mode でのみ機能します。
+
+### ウェーブの流れ
+
+1. 規定数の敵を倒すと **「WAVE X CLEAR」** 画面が表示される
+2. 3種類のアップグレードが提示される
+3. **`1` `2` `3` キー**で選択すると次のウェーブが開始
+
+### 必要撃破数
+
+| ウェーブ | 必要撃破数 |
+|---------|----------|
+| Wave 1 | 10体 |
+| Wave 2 | 14体 |
+| Wave 3 | 17体 |
+| Wave N | 8 + N×3体 |
+
+### アップグレード一覧（8種からランダムに3択）
+
+| アップグレード | 効果 |
+|-------------|------|
+| MEDIC SUPPLY | コアHP +30 回復 |
+| AZURE BOOST | P1 速度+80 / ダメージ+2 |
+| SOLAR BOOST | P2 速度+50 / ダメージ+6 |
+| RAPID STRIKE | 両プレイヤーの射撃速度 +25% |
+| CORE ARMOR | 最大HP +30 / HP +15 回復 |
+| BULLET STORM | 両プレイヤーの弾速 +200 |
+| OVERDRIVE | 両プレイヤーのダメージ +4 |
+| LINK AMPLIFIER | CO-OPリンクゲージが50%速く溜まる |
+
+> アップグレードは累積します。複数回選択すると重複して強化されます。
+
+---
+
+## フュージョンモード
+
+Story Mode専用の強力な合体システムです。
+
+### 発動条件
+
+- P1・P2が互いに近い位置、またはコア付近にいると **CO-OP LINKゲージ** が蓄積する
+- ゲージが100%になったら `G` / `K` / `Space` を押して発動
+- Link Chargeアイテムで即時大量補充可能
+
+### フュージョン中の性能
+
+| 項目 | 内容 |
+|------|------|
+| 持続時間 | 12秒 |
+| フュージョンキャノン | ポインター方向へ高威力射撃（P1: F） |
+| 爆弾 | 最大3個、半径185pxの範囲攻撃（P2: L） |
+| 耐久 | 通常敵は爆弾1発で即死、タンク敵は重ダメージ |
+
+### 演出
+
+- 発動時に**青白いフラッシュ**が点灯
+- 画面上部に**フュージョン残り時間バー**（緑色）が表示され、時間経過で縮小
+- 終了時「FUSION COMPLETE」と表示され通常モードに戻る
+
+---
+
+## オンラインプレイ
+
+ブラウザ経由で2人がオンラインで対戦・協力できます。
+
+### プレイ方法
+
+1. タイトル画面の **ONLINE LOBBY** をクリック
+2. プレイヤー名を入力して **CONNECT**
+3. ホスト側が **CREATE ROOM** → ルームコードが発行される
+4. ゲスト側がルームコードを入力して参加
+5. P1 / P2 の役割を選択して **READY**
+6. 両プレイヤーがReadyになると **START GAME** でゲーム開始
+
+### ゲームURL
+
+`https://1234abcdssoshi.github.io/twin-core-blasters-1.0/`
+
+---
+
+## サーバーの起動方法
+
+ローカルでサーバーを動かす場合の手順です。
+
+```powershell
+cd server
+npm install
+npm start
 ```
 
+起動成功時のメッセージ：
 
-## Online Input Step 8
+```
+Twin Core Blasters WebSocket server listening on ws://0.0.0.0:8080
+```
 
-See `README_ONLINE_INPUT_STEP8_INPUT_RELAY.md`.
+> 本番サーバーは Render.com に常時稼働中です。ローカル起動は開発・デバッグ用途です。
+
+---
+
+## 最近追加した機能
+
+| 機能 | 内容 |
+|------|------|
+| ポーズメニュー | ESCキーでゲームを一時停止。Resume / Home ボタンを表示 |
+| BGM一時停止 | ポーズ中・ウェーブアップグレード中は曲が止まる |
+| 弾の向き修正 | P1・P2の弾スプライトが進行方向に正しく向くよう修正 |
+| 敵のアイテムドロップ | 敵撃破時28%の確率で金色のアイテムをドロップ |
+| ウェーブシステム | 一定数撃破でウェーブクリア、アップグレード選択（1・2・3キー） |
+| アップグレード | 8種のパワーアップを蓄積できるシステム |
+| フュージョン演出強化 | 発動時フラッシュ・残り時間バー追加 |
+| Link Charge調整 | 出現率を他アイテムの半分程度に削減 |
