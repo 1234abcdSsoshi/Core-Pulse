@@ -20,7 +20,7 @@ enum GameMode { TITLE, STORY, ASTRAL_COURT, RAID }
 
 # ── ゲームバランス設定 ────────────────────────────────────────────────────────
 # ここの値を変えるだけでバランス調整できます。
-const CORE_HP_MAX := 100      # コアの最大体力（Story Mode）
+const CORE_HP_MAX := 1000      # コアの最大体力（Story Mode）
 # ─────────────────────────────────────────────────────────────────────────────
 
 var mode: GameMode = GameMode.TITLE
@@ -1850,15 +1850,16 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 
 	_add_sep.call(lx - 8.0)   # separator before LINK section
 	story_link_header_label = _add_header.call(story_link_container, lx, "CO-OP LINK")
-	var lnk_bars: Array = _add_bar.call(story_link_container, lx, 155.0, Color(0.04, 0.10, 0.10))
+	story_link_header_label.size = Vector2(200, 18)   # wider — "CO-OP LINK"/"FUSION TIME" needs room
+	var lnk_bars: Array = _add_bar.call(story_link_container, lx, 130.0, Color(0.04, 0.10, 0.10))
 	story_link_bar_bg   = lnk_bars[0]
 	story_link_bar_fill = lnk_bars[1]
 	story_link_bar_fill.color = Color(0.20, 1.0, 0.65)
 	story_link_bar_fill.size.x = 0.0
 	story_link_label = Label.new()
-	story_link_label.position = Vector2(lx + 160.0, 14)
-	story_link_label.size = Vector2(62, 28)
-	story_link_label.add_theme_font_size_override("font_size", 18)
+	story_link_label.position = Vector2(lx + 135.0, 14)
+	story_link_label.size = Vector2(100, 28)
+	story_link_label.add_theme_font_size_override("font_size", 14)
 	story_link_label.add_theme_color_override("font_color", Color(0.20, 1.0, 0.65))
 	story_link_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	story_link_container.add_child(story_link_label)
@@ -3749,7 +3750,7 @@ func _update_story_hud_bar() -> void:
 			story_link_header_label.text = "FUSION TIME"
 			story_link_header_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20))
 			story_link_bar_bg.color      = Color(0.10, 0.06, 0.02)
-			story_link_bar_fill.size.x   = 155.0 * fuse_ratio
+			story_link_bar_fill.size.x   = 130.0 * fuse_ratio
 			story_link_bar_fill.color    = Color(1.0, 0.75, 0.10)
 			story_link_label.text        = "💣%d/%d  %.0fs" % [bombs.size(), story_bomb_max_count, story_fusion_timer]
 			story_link_label.add_theme_color_override("font_color", Color(1.0, 0.90, 0.45))
@@ -3763,7 +3764,7 @@ func _update_story_hud_bar() -> void:
 			story_link_header_label.text = "CO-OP LINK"
 			story_link_header_label.add_theme_color_override("font_color", Color(0.45, 0.60, 0.80))
 			story_link_bar_bg.color      = Color(0.04, 0.10, 0.10)
-			story_link_bar_fill.size.x   = 155.0 * lk
+			story_link_bar_fill.size.x   = 130.0 * lk
 			if coop_link >= 100.0:
 				story_link_bar_fill.color = Color(1.0, 0.95, 0.20)
 				story_link_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.20))
