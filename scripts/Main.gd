@@ -260,17 +260,22 @@ var boss_hp_back: Sprite2D
 var boss_hp_fill: ColorRect
 
 # Story HUD bar (top compact bar)
+var story_hud_container: Control      # master container — hide to remove all
 var story_hud_bar: ColorRect
 var story_mode_label: Label
 var story_core_bar_bg: ColorRect
 var story_core_bar_fill: ColorRect
 var story_core_label: Label
-var story_shield_label: Label
+var story_shield_bar_bg: ColorRect
+var story_shield_bar_fill: ColorRect
+var story_shield_label: Label         # "Xs" fallback when no shield
 var story_score_label: Label
+var story_link_container: Control     # shown only when coop_link > 0
 var story_link_bar_bg: ColorRect
 var story_link_bar_fill: ColorRect
 var story_link_label: Label
 var story_fusion_label: Label
+var core_shield_max := 0.0            # tracks max shield for bar ratio
 
 # Step 13: 繧ｪ繝ｳ繝ｩ繧､繝ｳ繝励Ξ繧､荳ｭ縺縺題｡ｨ遉ｺ縺吶ｋ蟆上＆縺ｪ繧ｹ繝・・繧ｿ繧ｹHUD縺ｧ縺吶
 # 繝ｭ繝薙・UI縺ｨ縺ｯ蛻･縺ｮCanvasLayer縺ｫ縺励※縲√ご繝ｼ繝逕ｻ髱｢縺ｮ荳翫↓蝗ｺ螳夊｡ｨ遉ｺ縺励∪縺吶
@@ -1719,36 +1724,56 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 	var BAR_H   := 52
 	var BG_COL  := Color(0.04, 0.06, 0.14, 0.90)
 	var SEP_COL := Color(0.25, 0.35, 0.55, 0.60)
-	var sw := screen_size.x
+	var sw      := screen_size.x
 
-	# Full-width dark background bar
+	# ── Master container — hiding this hides everything ──────────────
+	story_hud_container = Control.new()
+	story_hud_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	story_hud_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_hud_container.visible = false        # hidden until STORY mode starts
+	hud_layer.add_child(story_hud_container)
+
+	# Background bar (child of container)
 	story_hud_bar = ColorRect.new()
 	story_hud_bar.position = Vector2(0, 0)
 	story_hud_bar.size = Vector2(sw, BAR_H)
 	story_hud_bar.color = BG_COL
 	story_hud_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_hud_bar)
+	story_hud_container.add_child(story_hud_bar)
 
-	# Helper: vertical separator at x
+	# Helper lambdas — all children go into story_hud_container
 	var _add_sep := func(x: float) -> void:
 		var sep := ColorRect.new()
 		sep.position = Vector2(x, 6)
 		sep.size = Vector2(1, BAR_H - 12)
 		sep.color = SEP_COL
 		sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		hud_layer.add_child(sep)
+		story_hud_container.add_child(sep)
 
-	# Helper: small header label
-	var _add_header := func(x: float, txt: String) -> Label:
+	var _add_header := func(parent: Control, x: float, txt: String) -> Label:
 		var l := Label.new()
 		l.text = txt
 		l.position = Vector2(x, 4)
-		l.size = Vector2(120, 18)
+		l.size = Vector2(140, 18)
 		l.add_theme_font_size_override("font_size", 12)
 		l.add_theme_color_override("font_color", Color(0.45, 0.60, 0.80))
 		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		hud_layer.add_child(l)
+		parent.add_child(l)
 		return l
+
+	var _add_bar := func(parent: Control, x: float, w: float, bg: Color) -> Array:
+		var bg_rect := ColorRect.new()
+		bg_rect.position = Vector2(x, 22)
+		bg_rect.size = Vector2(w, 14)
+		bg_rect.color = bg
+		bg_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(bg_rect)
+		var fill := ColorRect.new()
+		fill.position = Vector2(x, 22)
+		fill.size = Vector2(w, 14)
+		fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(fill)
+		return [bg_rect, fill]
 
 	# ── Mode label ───────────────────────────────── x=10
 	story_mode_label = Label.new()
@@ -1758,93 +1783,86 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 	story_mode_label.add_theme_font_size_override("font_size", 18)
 	story_mode_label.add_theme_color_override("font_color", Color(0.55, 0.80, 1.0))
 	story_mode_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_mode_label)
+	story_hud_container.add_child(story_mode_label)
 	_add_sep.call(176.0)
 
-	# ── Core HP ─────────────────────────────────── x=182
-	_add_header.call(182.0, "CORE")
-	story_core_bar_bg = ColorRect.new()
-	story_core_bar_bg.position = Vector2(182, 22)
-	story_core_bar_bg.size = Vector2(130, 14)
-	story_core_bar_bg.color = Color(0.12, 0.04, 0.04, 1.0)
-	story_core_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_core_bar_bg)
-	story_core_bar_fill = ColorRect.new()
-	story_core_bar_fill.position = Vector2(182, 22)
-	story_core_bar_fill.size = Vector2(130, 14)
+	# ── Core HP bar ──────────────────────────────── x=182
+	_add_header.call(story_hud_container, 182.0, "CORE")
+	var core_bars: Array = _add_bar.call(story_hud_container, 182.0, 130.0, Color(0.12, 0.04, 0.04))
+	story_core_bar_bg   = core_bars[0]
+	story_core_bar_fill = core_bars[1]
 	story_core_bar_fill.color = Color(0.95, 0.22, 0.22)
-	story_core_bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_core_bar_fill)
 	story_core_label = Label.new()
-	story_core_label.text = "%d/%d" % [CORE_HP_MAX, CORE_HP_MAX]
 	story_core_label.position = Vector2(318, 14)
-	story_core_label.size = Vector2(80, 28)
+	story_core_label.size = Vector2(82, 28)
 	story_core_label.add_theme_font_size_override("font_size", 18)
 	story_core_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.75))
 	story_core_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_core_label)
-	_add_sep.call(400.0)
+	story_hud_container.add_child(story_core_label)
+	_add_sep.call(403.0)
 
-	# ── Shield ──────────────────────────────────── x=408
-	_add_header.call(408.0, "SHIELD")
-	story_shield_label = Label.new()
+	# ── Shield bar ───────────────────────────────── x=410
+	_add_header.call(story_hud_container, 410.0, "SHIELD")
+	var shd_bars: Array = _add_bar.call(story_hud_container, 410.0, 110.0, Color(0.04, 0.08, 0.14))
+	story_shield_bar_bg   = shd_bars[0]
+	story_shield_bar_fill = shd_bars[1]
+	story_shield_bar_fill.color = Color(0.30, 0.80, 1.0)
+	story_shield_bar_fill.size.x = 0.0
+	story_shield_label = Label.new()   # "--" when no shield
 	story_shield_label.text = "--"
-	story_shield_label.position = Vector2(408, 18)
-	story_shield_label.size = Vector2(90, 30)
-	story_shield_label.add_theme_font_size_override("font_size", 20)
-	story_shield_label.add_theme_color_override("font_color", Color(0.4, 0.85, 1.0))
+	story_shield_label.position = Vector2(524, 14)
+	story_shield_label.size = Vector2(60, 28)
+	story_shield_label.add_theme_font_size_override("font_size", 18)
+	story_shield_label.add_theme_color_override("font_color", Color(0.30, 0.50, 0.65))
 	story_shield_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_shield_label)
-	_add_sep.call(502.0)
+	story_hud_container.add_child(story_shield_label)
+	_add_sep.call(588.0)
 
-	# ── Score ───────────────────────────────────── x=510
-	_add_header.call(510.0, "SCORE")
+	# ── Score ────────────────────────────────────── x=596
+	_add_header.call(story_hud_container, 596.0, "SCORE")
 	story_score_label = Label.new()
 	story_score_label.text = "0"
-	story_score_label.position = Vector2(510, 18)
-	story_score_label.size = Vector2(120, 30)
+	story_score_label.position = Vector2(596, 18)
+	story_score_label.size = Vector2(130, 28)
 	story_score_label.add_theme_font_size_override("font_size", 20)
 	story_score_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.55))
 	story_score_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_score_label)
-	_add_sep.call(636.0)
+	story_hud_container.add_child(story_score_label)
 
-	# ── CO-OP LINK bar ──────────────────────────── x=644
-	_add_header.call(644.0, "CO-OP LINK")
-	story_link_bar_bg = ColorRect.new()
-	story_link_bar_bg.position = Vector2(644, 22)
-	story_link_bar_bg.size = Vector2(140, 14)
-	story_link_bar_bg.color = Color(0.04, 0.10, 0.10, 1.0)
-	story_link_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_link_bar_bg)
-	story_link_bar_fill = ColorRect.new()
-	story_link_bar_fill.position = Vector2(644, 22)
-	story_link_bar_fill.size = Vector2(0, 14)
+	# ── CO-OP LINK (RIGHT side, before crystal) — hidden until link starts ─
+	# Position: sw-490 to sw-275  (crystal label starts at sw-260)
+	var lx: float = sw - 490.0
+	story_link_container = Control.new()
+	story_link_container.position = Vector2.ZERO
+	story_link_container.size = Vector2(sw, BAR_H)
+	story_link_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_link_container.visible = false
+	story_hud_container.add_child(story_link_container)
+
+	_add_sep.call(lx - 8.0)   # separator before LINK section
+	_add_header.call(story_link_container, lx, "CO-OP LINK")
+	var lnk_bars: Array = _add_bar.call(story_link_container, lx, 155.0, Color(0.04, 0.10, 0.10))
+	story_link_bar_bg   = lnk_bars[0]
+	story_link_bar_fill = lnk_bars[1]
 	story_link_bar_fill.color = Color(0.20, 1.0, 0.65)
-	story_link_bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_link_bar_fill)
+	story_link_bar_fill.size.x = 0.0
 	story_link_label = Label.new()
-	story_link_label.text = "0%"
-	story_link_label.position = Vector2(790, 14)
-	story_link_label.size = Vector2(60, 28)
+	story_link_label.position = Vector2(lx + 160.0, 14)
+	story_link_label.size = Vector2(62, 28)
 	story_link_label.add_theme_font_size_override("font_size", 18)
 	story_link_label.add_theme_color_override("font_color", Color(0.20, 1.0, 0.65))
 	story_link_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_link_label)
+	story_link_container.add_child(story_link_label)
 
-	# ── Fusion overlay label (hidden normally) ────
+	# Fusion overlay (replaces link display during fusion)
 	story_fusion_label = Label.new()
-	story_fusion_label.text = ""
-	story_fusion_label.position = Vector2(644, 10)
-	story_fusion_label.size = Vector2(210, 36)
-	story_fusion_label.add_theme_font_size_override("font_size", 20)
+	story_fusion_label.position = Vector2(lx, 10)
+	story_fusion_label.size = Vector2(230, 36)
+	story_fusion_label.add_theme_font_size_override("font_size", 18)
 	story_fusion_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.20))
 	story_fusion_label.visible = false
 	story_fusion_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_layer.add_child(story_fusion_label)
-
-	# Initially hidden — shown only in STORY mode
-	story_hud_bar.visible = false
+	story_link_container.add_child(story_fusion_label)
 
 
 # ── Weapon fire helpers ───────────────────────────────────────────────────────
@@ -2548,6 +2566,7 @@ func _start_story() -> void:
 	p2_score = 0
 	base_hp = CORE_HP_MAX
 	core_shield_time = 0.0
+	core_shield_max  = 0.0
 	coop_link = 0.0
 	story_wave = 1
 	result_title = ""
@@ -3442,6 +3461,7 @@ func _apply_item(key: String, p: Dictionary) -> void:
 		"shield":
 			# P2 is the defensive pilot, so Shield lasts longer when P2 collects it.
 			core_shield_time = 10.0 if player_id == 2 else 7.0
+			core_shield_max = core_shield_time
 			_spawn_effect(AssetPaths.EFFECTS["shield_bubble"], base_sprite.position, Vector2(340, 340) if player_id == 2 else Vector2(300, 300), 0.55)
 			if audio_manager != null:
 				audio_manager.play_sfx("item_shield", -5.0)
@@ -3645,8 +3665,8 @@ func _update_effects(delta: float) -> void:
 
 func _update_ui() -> void:
 	var in_story := (mode == GameMode.STORY)
-	if story_hud_bar != null:
-		story_hud_bar.visible = in_story
+	if story_hud_container != null:
+		story_hud_container.visible = in_story
 
 	match mode:
 		GameMode.TITLE:
@@ -3678,52 +3698,61 @@ func _update_ui() -> void:
 
 
 func _update_story_hud_bar() -> void:
-	if story_hud_bar == null:
+	if story_hud_container == null:
 		return
 	var fusion := story_fusion_active
 
-	# Core HP bar
+	# ── Core HP bar ──────────────────────────────────────────────────
 	var hp_ratio := clampf(float(base_hp) / float(CORE_HP_MAX), 0.0, 1.0)
 	story_core_bar_fill.size.x = 130.0 * hp_ratio
 	story_core_label.text = "%d/%d" % [base_hp, CORE_HP_MAX]
-	var r := 1.0 - hp_ratio * 0.5
-	var g := hp_ratio * 0.8
-	story_core_bar_fill.color = Color(r, g, 0.15)
+	var r := 1.0 - hp_ratio * 0.55
+	var g := hp_ratio * 0.80
+	story_core_bar_fill.color = Color(r, g, 0.12)
 
-	# Shield
+	# ── Shield bar ───────────────────────────────────────────────────
 	if core_shield_time > 0.0:
-		story_shield_label.text = "%.0fs" % core_shield_time
-		story_shield_label.add_theme_color_override("font_color", Color(0.4, 0.85, 1.0))
+		var shd_ratio := clampf(core_shield_time / maxf(core_shield_max, 1.0), 0.0, 1.0)
+		story_shield_bar_fill.size.x = 110.0 * shd_ratio
+		story_shield_bar_bg.visible  = true
+		story_shield_bar_fill.visible = true
+		story_shield_label.visible   = false
 	else:
-		story_shield_label.text = "--"
-		story_shield_label.add_theme_color_override("font_color", Color(0.30, 0.40, 0.50))
+		story_shield_bar_bg.visible   = false
+		story_shield_bar_fill.visible = false
+		story_shield_label.visible    = true
+		story_shield_label.text       = "--"
 
-	# Score
+	# ── Score ────────────────────────────────────────────────────────
 	story_score_label.text = "%d" % team_score
 
-	# CO-OP LINK bar
-	if fusion:
-		story_link_bar_fill.color = Color(1.0, 0.80, 0.20)
-		story_link_bar_fill.size.x = 140.0
-		story_link_label.visible = false
-		story_fusion_label.visible = true
-		story_fusion_label.text = "FUSION  %.0fs  💣%d/%d" % [story_fusion_timer, bombs.size(), story_bomb_max_count]
-		story_mode_label.text = "FUSION MODE"
-		story_mode_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20))
-	else:
-		var lk := clampf(coop_link / 100.0, 0.0, 1.0)
-		story_link_bar_fill.size.x = 140.0 * lk
-		if coop_link >= 100.0:
-			story_link_bar_fill.color = Color(1.0, 0.95, 0.20)
-			story_link_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.20))
+	# ── CO-OP LINK (right side) — visible only when linking/fusing ──
+	var link_active := coop_link > 0.0 or fusion
+	story_link_container.visible = link_active
+
+	if link_active:
+		if fusion:
+			story_link_bar_fill.color  = Color(1.0, 0.80, 0.20)
+			story_link_bar_fill.size.x = 155.0
+			story_link_label.visible   = false
+			story_fusion_label.visible = true
+			story_fusion_label.text    = "FUSION  %.0fs  💣%d/%d" % [story_fusion_timer, bombs.size(), story_bomb_max_count]
+			story_mode_label.text      = "FUSION MODE"
+			story_mode_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20))
 		else:
-			story_link_bar_fill.color = Color(0.20, 1.0, 0.65)
-			story_link_label.add_theme_color_override("font_color", Color(0.20, 1.0, 0.65))
-		story_link_label.text = "%.0f%%" % coop_link
-		story_link_label.visible = true
-		story_fusion_label.visible = false
-		story_mode_label.text = "CO-OP DEFENSE"
-		story_mode_label.add_theme_color_override("font_color", Color(0.55, 0.80, 1.0))
+			var lk := clampf(coop_link / 100.0, 0.0, 1.0)
+			story_link_bar_fill.size.x = 155.0 * lk
+			if coop_link >= 100.0:
+				story_link_bar_fill.color = Color(1.0, 0.95, 0.20)
+				story_link_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.20))
+			else:
+				story_link_bar_fill.color = Color(0.20, 1.0, 0.65)
+				story_link_label.add_theme_color_override("font_color", Color(0.20, 1.0, 0.65))
+			story_link_label.text      = "%.0f%%" % coop_link
+			story_link_label.visible   = true
+			story_fusion_label.visible = false
+			story_mode_label.text      = "CO-OP DEFENSE"
+			story_mode_label.add_theme_color_override("font_color", Color(0.55, 0.80, 1.0))
 
 
 func _print_network_input_debug() -> void:
