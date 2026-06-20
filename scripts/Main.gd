@@ -804,7 +804,7 @@ func _setup_world() -> void:
 	add_child(bg_sprite)
 
 	base_sprite = AssetPaths.create_sprite(AssetPaths.STAGES["base_core"], Vector2(190, 190), Color(0.2, 0.9, 1.0), 0)
-	base_sprite.position = screen_size * 0.5
+	base_sprite.position = Vector2(screen_size.x * 0.5, screen_size.y - 130)
 	add_child(base_sprite)
 
 	base_shield_sprite = AssetPaths.create_sprite(AssetPaths.EFFECTS["shield_bubble"], Vector2(260, 260), Color(0.5, 0.9, 1.0, 0.7), 2)
@@ -1090,7 +1090,7 @@ func _update_crystals(delta: float) -> void:
 
 func _update_hud_crystal_label() -> void:
 	if hud_crystal_label != null:
-		hud_crystal_label.text = "💎 %d" % crystals
+		hud_crystal_label.text = "%d" % crystals
 
 func _check_shop_notify() -> void:
 	if shop_notify_ring == null:
@@ -1660,18 +1660,28 @@ func _setup_shop_hud_button() -> void:
 	hud_layer.layer = 20
 	add_child(hud_layer)
 
+	# Story HUD bar added first so shop elements render ON TOP of it
+	_setup_story_hud_bar(hud_layer)
+
 	# ── Shop/crystal container — hidden until STORY mode ──────────────
+	# Added after story_hud_container so it draws on top of the dark bar bg
 	shop_hud_container = Control.new()
 	shop_hud_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shop_hud_container.mouse_filter = Control.MOUSE_FILTER_PASS
 	shop_hud_container.visible = false
 	hud_layer.add_child(shop_hud_container)
 
-	# Crystal label
+	# Crystal icon (item_crystal.png)
+	var crystal_icon := AssetPaths.create_sprite(AssetPaths.ITEMS["crystal"], Vector2(30, 30), Color(0.4, 0.95, 1.0))
+	crystal_icon.position = Vector2(screen_size.x - 260, 30)
+	crystal_icon.z_index = 1
+	shop_hud_container.add_child(crystal_icon)
+
+	# Crystal count label (number only, icon replaces emoji)
 	hud_crystal_label = Label.new()
-	hud_crystal_label.text = "💎 0"
-	hud_crystal_label.position = Vector2(screen_size.x - 260, 14)
-	hud_crystal_label.size = Vector2(140, 40)
+	hud_crystal_label.text = "0"
+	hud_crystal_label.position = Vector2(screen_size.x - 238, 14)
+	hud_crystal_label.size = Vector2(90, 40)
 	hud_crystal_label.add_theme_font_size_override("font_size", 26)
 	hud_crystal_label.add_theme_color_override("font_color", Color(0.3, 0.95, 1.0))
 	shop_hud_container.add_child(hud_crystal_label)
@@ -1695,7 +1705,7 @@ func _setup_shop_hud_button() -> void:
 	# Shop icon
 	var shop_icon := AssetPaths.create_sprite(AssetPaths.UI["shop"], Vector2(32, 32), Color(0.3, 0.9, 1.0))
 	shop_icon.position = Vector2(screen_size.x - 100, 32)
-	shop_icon.z_index = 21
+	shop_icon.z_index = 1
 	shop_hud_container.add_child(shop_icon)
 
 	# Shop label
@@ -1726,7 +1736,6 @@ func _setup_shop_hud_button() -> void:
 	key_hint.add_theme_font_size_override("font_size", 14)
 	key_hint.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
 	shop_hud_container.add_child(key_hint)
-	_setup_story_hud_bar(hud_layer)
 
 
 func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
@@ -2602,7 +2611,7 @@ func _start_story() -> void:
 	link_fill.visible = false
 
 	for p in players:
-		p["pos"] = Vector2(screen_size.x * (0.35 if p["id"] == 1 else 0.65), screen_size.y - 160)
+		p["pos"] = Vector2(screen_size.x * (0.35 if p["id"] == 1 else 0.65), screen_size.y - 280)
 		p["hp"] = 100
 		p["rapid"] = 0.0
 		p["power"] = 0.0
@@ -2972,7 +2981,8 @@ func _update_story(delta: float) -> void:
 		fusion_flash_timer -= delta
 		fusion_flash_rect.color.a = fusion_flash_timer / 0.35 * 0.82
 
-	if story_fusion_active and fusion_bar_fill != null:
+	# Old center fusion bar — only used in non-STORY modes (RAID etc.)
+	if story_fusion_active and fusion_bar_fill != null and mode != GameMode.STORY:
 		var ratio := story_fusion_timer / story_fusion_duration
 		fusion_bar_fill.size.x = 680.0 * clampf(ratio, 0.0, 1.0)
 
@@ -3064,7 +3074,7 @@ func _activate_story_fusion(reason: String = "LINK READY") -> void:
 	fusion_flash_timer = 0.35
 	if fusion_flash_rect != null:
 		fusion_flash_rect.color = Color(0.5, 0.9, 1.0, 0.82)
-	if fusion_bar_back != null:
+	if fusion_bar_back != null and mode != GameMode.STORY:
 		fusion_bar_back.visible = true
 		fusion_bar_fill.visible = true
 		fusion_bar_fill.size.x = 680.0
