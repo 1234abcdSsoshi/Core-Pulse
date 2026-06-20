@@ -182,6 +182,7 @@ var shop_page := 0  # 0=ITEMS  1=WEAPONS  2=TURRETS
 var shop_layer: CanvasLayer
 var hud_crystal_label: Label
 var shop_notify_ring: ColorRect
+var shop_hud_container: Control
 var p1_weapon: String = ""
 var p2_weapon: String = ""
 var p1_weapon_cd := 0.0
@@ -271,9 +272,10 @@ var story_shield_bar_fill: ColorRect
 var story_shield_label: Label         # "Xs" fallback when no shield
 var story_score_label: Label
 var story_link_container: Control     # shown only when coop_link > 0
+var story_link_header_label: Label    # "CO-OP LINK" / "FUSION TIME"
 var story_link_bar_bg: ColorRect
 var story_link_bar_fill: ColorRect
-var story_link_label: Label
+var story_link_label: Label           # "XX%" or "💣x/y"
 var story_fusion_label: Label
 var core_shield_max := 0.0            # tracks max shield for bar ratio
 
@@ -1658,6 +1660,13 @@ func _setup_shop_hud_button() -> void:
 	hud_layer.layer = 20
 	add_child(hud_layer)
 
+	# ── Shop/crystal container — hidden until STORY mode ──────────────
+	shop_hud_container = Control.new()
+	shop_hud_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shop_hud_container.mouse_filter = Control.MOUSE_FILTER_PASS
+	shop_hud_container.visible = false
+	hud_layer.add_child(shop_hud_container)
+
 	# Crystal label
 	hud_crystal_label = Label.new()
 	hud_crystal_label.text = "💎 0"
@@ -1665,7 +1674,7 @@ func _setup_shop_hud_button() -> void:
 	hud_crystal_label.size = Vector2(140, 40)
 	hud_crystal_label.add_theme_font_size_override("font_size", 26)
 	hud_crystal_label.add_theme_color_override("font_color", Color(0.3, 0.95, 1.0))
-	hud_layer.add_child(hud_crystal_label)
+	shop_hud_container.add_child(hud_crystal_label)
 
 	# Shop button background
 	var btn_bg := ColorRect.new()
@@ -1673,7 +1682,7 @@ func _setup_shop_hud_button() -> void:
 	btn_bg.size = Vector2(100, 44)
 	btn_bg.color = Color(0.05, 0.1, 0.22, 0.92)
 	btn_bg.mouse_filter = Control.MOUSE_FILTER_STOP
-	hud_layer.add_child(btn_bg)
+	shop_hud_container.add_child(btn_bg)
 
 	# Notify glow ring (visible when items are affordable)
 	shop_notify_ring = ColorRect.new()
@@ -1681,13 +1690,13 @@ func _setup_shop_hud_button() -> void:
 	shop_notify_ring.size = Vector2(104, 48)
 	shop_notify_ring.color = Color(0.2, 1.0, 0.6, 0.45)
 	shop_notify_ring.visible = false
-	hud_layer.add_child(shop_notify_ring)
+	shop_hud_container.add_child(shop_notify_ring)
 
 	# Shop icon
 	var shop_icon := AssetPaths.create_sprite(AssetPaths.UI["shop"], Vector2(32, 32), Color(0.3, 0.9, 1.0))
 	shop_icon.position = Vector2(screen_size.x - 100, 32)
 	shop_icon.z_index = 21
-	hud_layer.add_child(shop_icon)
+	shop_hud_container.add_child(shop_icon)
 
 	# Shop label
 	var shop_lbl := Label.new()
@@ -1697,7 +1706,7 @@ func _setup_shop_hud_button() -> void:
 	shop_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	shop_lbl.add_theme_font_size_override("font_size", 20)
 	shop_lbl.add_theme_color_override("font_color", Color(0.5, 0.9, 1.0))
-	hud_layer.add_child(shop_lbl)
+	shop_hud_container.add_child(shop_lbl)
 
 	# Invisible clickable button over the shop area
 	var shop_btn := Button.new()
@@ -1706,7 +1715,7 @@ func _setup_shop_hud_button() -> void:
 	shop_btn.flat = true
 	shop_btn.modulate = Color(1, 1, 1, 0)
 	shop_btn.pressed.connect(_open_shop)
-	hud_layer.add_child(shop_btn)
+	shop_hud_container.add_child(shop_btn)
 
 	# Key hint
 	var key_hint := Label.new()
@@ -1716,7 +1725,7 @@ func _setup_shop_hud_button() -> void:
 	key_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	key_hint.add_theme_font_size_override("font_size", 14)
 	key_hint.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
-	hud_layer.add_child(key_hint)
+	shop_hud_container.add_child(key_hint)
 	_setup_story_hud_bar(hud_layer)
 
 
@@ -1840,7 +1849,7 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 	story_hud_container.add_child(story_link_container)
 
 	_add_sep.call(lx - 8.0)   # separator before LINK section
-	_add_header.call(story_link_container, lx, "CO-OP LINK")
+	story_link_header_label = _add_header.call(story_link_container, lx, "CO-OP LINK")
 	var lnk_bars: Array = _add_bar.call(story_link_container, lx, 155.0, Color(0.04, 0.10, 0.10))
 	story_link_bar_bg   = lnk_bars[0]
 	story_link_bar_fill = lnk_bars[1]
@@ -3667,6 +3676,8 @@ func _update_ui() -> void:
 	var in_story := (mode == GameMode.STORY)
 	if story_hud_container != null:
 		story_hud_container.visible = in_story
+	if shop_hud_container != null:
+		shop_hud_container.visible = in_story
 
 	match mode:
 		GameMode.TITLE:
@@ -3726,32 +3737,43 @@ func _update_story_hud_bar() -> void:
 	# ── Score ────────────────────────────────────────────────────────
 	story_score_label.text = "%d" % team_score
 
-	# ── CO-OP LINK (right side) — visible only when linking/fusing ──
+	# ── CO-OP LINK / FUSION TIME (right side) ────────────────────────
+	# Container visible when link is building or fusion is active
 	var link_active := coop_link > 0.0 or fusion
 	story_link_container.visible = link_active
 
 	if link_active:
 		if fusion:
-			story_link_bar_fill.color  = Color(1.0, 0.80, 0.20)
-			story_link_bar_fill.size.x = 155.0
-			story_link_label.visible   = false
-			story_fusion_label.visible = true
-			story_fusion_label.text    = "FUSION  %.0fs  💣%d/%d" % [story_fusion_timer, bombs.size(), story_bomb_max_count]
-			story_mode_label.text      = "FUSION MODE"
+			# Timer bar replaces link gauge — shrinks as fusion counts down
+			var fuse_ratio := clampf(story_fusion_timer / maxf(story_fusion_duration, 1.0), 0.0, 1.0)
+			story_link_header_label.text = "FUSION TIME"
+			story_link_header_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20))
+			story_link_bar_bg.color      = Color(0.10, 0.06, 0.02)
+			story_link_bar_fill.size.x   = 155.0 * fuse_ratio
+			story_link_bar_fill.color    = Color(1.0, 0.75, 0.10)
+			story_link_label.text        = "💣%d/%d  %.0fs" % [bombs.size(), story_bomb_max_count, story_fusion_timer]
+			story_link_label.add_theme_color_override("font_color", Color(1.0, 0.90, 0.45))
+			story_link_label.visible     = true
+			story_fusion_label.visible   = false
+			story_mode_label.text        = "FUSION MODE"
 			story_mode_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20))
 		else:
+			# Link gauge — grows toward 100%
 			var lk := clampf(coop_link / 100.0, 0.0, 1.0)
-			story_link_bar_fill.size.x = 155.0 * lk
+			story_link_header_label.text = "CO-OP LINK"
+			story_link_header_label.add_theme_color_override("font_color", Color(0.45, 0.60, 0.80))
+			story_link_bar_bg.color      = Color(0.04, 0.10, 0.10)
+			story_link_bar_fill.size.x   = 155.0 * lk
 			if coop_link >= 100.0:
 				story_link_bar_fill.color = Color(1.0, 0.95, 0.20)
 				story_link_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.20))
 			else:
 				story_link_bar_fill.color = Color(0.20, 1.0, 0.65)
 				story_link_label.add_theme_color_override("font_color", Color(0.20, 1.0, 0.65))
-			story_link_label.text      = "%.0f%%" % coop_link
-			story_link_label.visible   = true
-			story_fusion_label.visible = false
-			story_mode_label.text      = "CO-OP DEFENSE"
+			story_link_label.text        = "%.0f%%" % coop_link
+			story_link_label.visible     = true
+			story_fusion_label.visible   = false
+			story_mode_label.text        = "CO-OP DEFENSE"
 			story_mode_label.add_theme_color_override("font_color", Color(0.55, 0.80, 1.0))
 
 
