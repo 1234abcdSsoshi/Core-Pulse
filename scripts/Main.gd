@@ -20,7 +20,7 @@ enum GameMode { TITLE, STORY, ASTRAL_COURT, RAID }
 
 # ── ゲームバランス設定 ────────────────────────────────────────────────────────
 # ここの値を変えるだけでバランス調整できます。
-const CORE_HP_MAX := 10000      # コアの最大体力（Story Mode）
+const CORE_HP_MAX := 100      # コアの最大体力（Story Mode）
 # ─────────────────────────────────────────────────────────────────────────────
 
 var mode: GameMode = GameMode.TITLE
@@ -97,6 +97,7 @@ var online_game_started_by_server: bool = false
 var players: Array[Dictionary] = []
 var bullets: Array[Dictionary] = []
 var enemies: Array[Dictionary] = []
+var enemy_bullets: Array[Dictionary] = []
 var items: Array[Dictionary] = []
 var effects: Array[Dictionary] = []
 var bombs: Array[Dictionary] = []
@@ -257,6 +258,19 @@ var link_back: ColorRect
 var link_fill: Sprite2D
 var boss_hp_back: Sprite2D
 var boss_hp_fill: ColorRect
+
+# Story HUD bar (top compact bar)
+var story_hud_bar: ColorRect
+var story_mode_label: Label
+var story_core_bar_bg: ColorRect
+var story_core_bar_fill: ColorRect
+var story_core_label: Label
+var story_shield_label: Label
+var story_score_label: Label
+var story_link_bar_bg: ColorRect
+var story_link_bar_fill: ColorRect
+var story_link_label: Label
+var story_fusion_label: Label
 
 # Step 13: 繧ｪ繝ｳ繝ｩ繧､繝ｳ繝励Ξ繧､荳ｭ縺縺題｡ｨ遉ｺ縺吶ｋ蟆上＆縺ｪ繧ｹ繝・・繧ｿ繧ｹHUD縺ｧ縺吶
 # 繝ｭ繝薙・UI縺ｨ縺ｯ蛻･縺ｮCanvasLayer縺ｫ縺励※縲√ご繝ｼ繝逕ｻ髱｢縺ｮ荳翫↓蝗ｺ螳夊｡ｨ遉ｺ縺励∪縺吶
@@ -1014,7 +1028,11 @@ func _on_pause_home_pressed() -> void:
 # ── Crystal system ───────────────────────────────────────────────────────────
 
 func _spawn_crystals_from_enemy(pos: Vector2, kind: String) -> void:
-	var counts := {"scout": [1, 1], "attacker": [2, 3], "tank": [5, 7], "elite": [7, 10]}
+	var counts := {
+		"scout": [1, 1], "attacker": [2, 3], "tank": [5, 7], "elite": [7, 10],
+		"phantom_dart": [1, 1], "fortress_walker": [12, 18],
+		"split_cell": [2, 2], "split_cell_frag": [1, 1], "bomber_drone": [4, 6],
+	}
 	var range_arr: Array = counts.get(kind, [1, 2])
 	var count := rng.randi_range(int(range_arr[0]), int(range_arr[1]))
 	for i in range(count):
@@ -1694,6 +1712,140 @@ func _setup_shop_hud_button() -> void:
 	key_hint.add_theme_font_size_override("font_size", 14)
 	key_hint.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
 	hud_layer.add_child(key_hint)
+	_setup_story_hud_bar(hud_layer)
+
+
+func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
+	var BAR_H   := 52
+	var BG_COL  := Color(0.04, 0.06, 0.14, 0.90)
+	var SEP_COL := Color(0.25, 0.35, 0.55, 0.60)
+	var sw := screen_size.x
+
+	# Full-width dark background bar
+	story_hud_bar = ColorRect.new()
+	story_hud_bar.position = Vector2(0, 0)
+	story_hud_bar.size = Vector2(sw, BAR_H)
+	story_hud_bar.color = BG_COL
+	story_hud_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_hud_bar)
+
+	# Helper: vertical separator at x
+	var _add_sep := func(x: float) -> void:
+		var sep := ColorRect.new()
+		sep.position = Vector2(x, 6)
+		sep.size = Vector2(1, BAR_H - 12)
+		sep.color = SEP_COL
+		sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud_layer.add_child(sep)
+
+	# Helper: small header label
+	var _add_header := func(x: float, txt: String) -> Label:
+		var l := Label.new()
+		l.text = txt
+		l.position = Vector2(x, 4)
+		l.size = Vector2(120, 18)
+		l.add_theme_font_size_override("font_size", 12)
+		l.add_theme_color_override("font_color", Color(0.45, 0.60, 0.80))
+		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud_layer.add_child(l)
+		return l
+
+	# ── Mode label ───────────────────────────────── x=10
+	story_mode_label = Label.new()
+	story_mode_label.text = "CO-OP DEFENSE"
+	story_mode_label.position = Vector2(10, 12)
+	story_mode_label.size = Vector2(160, 30)
+	story_mode_label.add_theme_font_size_override("font_size", 18)
+	story_mode_label.add_theme_color_override("font_color", Color(0.55, 0.80, 1.0))
+	story_mode_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_mode_label)
+	_add_sep.call(176.0)
+
+	# ── Core HP ─────────────────────────────────── x=182
+	_add_header.call(182.0, "CORE")
+	story_core_bar_bg = ColorRect.new()
+	story_core_bar_bg.position = Vector2(182, 22)
+	story_core_bar_bg.size = Vector2(130, 14)
+	story_core_bar_bg.color = Color(0.12, 0.04, 0.04, 1.0)
+	story_core_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_core_bar_bg)
+	story_core_bar_fill = ColorRect.new()
+	story_core_bar_fill.position = Vector2(182, 22)
+	story_core_bar_fill.size = Vector2(130, 14)
+	story_core_bar_fill.color = Color(0.95, 0.22, 0.22)
+	story_core_bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_core_bar_fill)
+	story_core_label = Label.new()
+	story_core_label.text = "%d/%d" % [CORE_HP_MAX, CORE_HP_MAX]
+	story_core_label.position = Vector2(318, 14)
+	story_core_label.size = Vector2(80, 28)
+	story_core_label.add_theme_font_size_override("font_size", 18)
+	story_core_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.75))
+	story_core_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_core_label)
+	_add_sep.call(400.0)
+
+	# ── Shield ──────────────────────────────────── x=408
+	_add_header.call(408.0, "SHIELD")
+	story_shield_label = Label.new()
+	story_shield_label.text = "--"
+	story_shield_label.position = Vector2(408, 18)
+	story_shield_label.size = Vector2(90, 30)
+	story_shield_label.add_theme_font_size_override("font_size", 20)
+	story_shield_label.add_theme_color_override("font_color", Color(0.4, 0.85, 1.0))
+	story_shield_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_shield_label)
+	_add_sep.call(502.0)
+
+	# ── Score ───────────────────────────────────── x=510
+	_add_header.call(510.0, "SCORE")
+	story_score_label = Label.new()
+	story_score_label.text = "0"
+	story_score_label.position = Vector2(510, 18)
+	story_score_label.size = Vector2(120, 30)
+	story_score_label.add_theme_font_size_override("font_size", 20)
+	story_score_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.55))
+	story_score_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_score_label)
+	_add_sep.call(636.0)
+
+	# ── CO-OP LINK bar ──────────────────────────── x=644
+	_add_header.call(644.0, "CO-OP LINK")
+	story_link_bar_bg = ColorRect.new()
+	story_link_bar_bg.position = Vector2(644, 22)
+	story_link_bar_bg.size = Vector2(140, 14)
+	story_link_bar_bg.color = Color(0.04, 0.10, 0.10, 1.0)
+	story_link_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_link_bar_bg)
+	story_link_bar_fill = ColorRect.new()
+	story_link_bar_fill.position = Vector2(644, 22)
+	story_link_bar_fill.size = Vector2(0, 14)
+	story_link_bar_fill.color = Color(0.20, 1.0, 0.65)
+	story_link_bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_link_bar_fill)
+	story_link_label = Label.new()
+	story_link_label.text = "0%"
+	story_link_label.position = Vector2(790, 14)
+	story_link_label.size = Vector2(60, 28)
+	story_link_label.add_theme_font_size_override("font_size", 18)
+	story_link_label.add_theme_color_override("font_color", Color(0.20, 1.0, 0.65))
+	story_link_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_link_label)
+
+	# ── Fusion overlay label (hidden normally) ────
+	story_fusion_label = Label.new()
+	story_fusion_label.text = ""
+	story_fusion_label.position = Vector2(644, 10)
+	story_fusion_label.size = Vector2(210, 36)
+	story_fusion_label.add_theme_font_size_override("font_size", 20)
+	story_fusion_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.20))
+	story_fusion_label.visible = false
+	story_fusion_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(story_fusion_label)
+
+	# Initially hidden — shown only in STORY mode
+	story_hud_bar.visible = false
+
 
 # ── Weapon fire helpers ───────────────────────────────────────────────────────
 
@@ -2513,7 +2665,7 @@ func _set_background(path: String) -> void:
 	bg_sprite.position = screen_size * 0.5
 
 func _clear_game_objects() -> void:
-	for arr in [bullets, enemies, items, effects, bombs]:
+	for arr in [bullets, enemy_bullets, enemies, items, effects, bombs]:
 		for obj in arr:
 			if obj.has("sprite") and is_instance_valid(obj["sprite"]):
 				obj["sprite"].queue_free()
@@ -2763,6 +2915,20 @@ func _check_bullet_hits(index: int) -> void:
 
 					_remove_bullet(index)
 					return
+			# Player bullets can destroy bomber drone projectiles
+			if owner_id == 1 or owner_id == 2:
+				for j in range(enemy_bullets.size() - 1, -1, -1):
+					var eb: Dictionary = enemy_bullets[j]
+					var eb_pos: Vector2 = eb["pos"]
+					if pos.distance_to(eb_pos) < radius + float(eb["radius"]):
+						_spawn_effect(AssetPaths.EFFECTS["hit_spark"], eb_pos, Vector2(60, 60), 0.14)
+						if audio_manager != null:
+							audio_manager.play_sfx("hit_small", -10.0)
+						if is_instance_valid(eb["sprite"]):
+							(eb["sprite"] as Sprite2D).queue_free()
+						enemy_bullets.remove_at(j)
+						_remove_bullet(index)
+						return
 
 func _remove_bullet(index: int) -> void:
 	if index < 0 or index >= bullets.size():
@@ -2830,6 +2996,7 @@ func _update_story(delta: float) -> void:
 		_spawn_item()
 		item_spawn_timer = rng.randf_range(5.0, 8.0)
 	_update_enemies(delta)
+	_update_enemy_bullets(delta)
 	if base_hp <= 0:
 		_game_over("CORE DESTROYED", "The central core collapsed.\nTeam Score: %d\nPress R to return to Home" % team_score)
 
@@ -3071,15 +3238,92 @@ func _story_twin_core_cannon() -> void:
 	_activate_story_fusion("CO-OP LINK 100%")
 
 func _spawn_enemy() -> void:
-	var roll := rng.randi_range(0, 3)
-	var key: String = ["scout", "attacker", "tank", "elite"][roll]
-	var hp: int = [18, 34, 70, 110][roll]
-	var speed: float = [210.0, 150.0, 90.0, 125.0][roll]
+	# Weighted pool — rare types (fortress_walker, tank, elite) appear ~6%
+	var pool: Array[String] = [
+		"scout", "scout", "scout",
+		"attacker", "attacker", "attacker",
+		"tank",
+		"elite",
+		"phantom_dart", "phantom_dart", "phantom_dart",
+		"fortress_walker",
+		"split_cell", "split_cell",
+		"bomber_drone", "bomber_drone",
+	]
+	var key: String = pool[rng.randi_range(0, pool.size() - 1)]
+
+	var hp_map     := {"scout":18,  "attacker":34,  "tank":70,   "elite":110,
+	                   "phantom_dart":10, "fortress_walker":350, "split_cell":50, "bomber_drone":65}
+	var speed_map  := {"scout":210.0,"attacker":150.0,"tank":90.0,"elite":125.0,
+	                   "phantom_dart":380.0,"fortress_walker":45.0,"split_cell":100.0,"bomber_drone":75.0}
+	var size_map   := {"scout":90.0, "attacker":90.0, "tank":90.0,"elite":90.0,
+	                   "phantom_dart":60.0,"fortress_walker":130.0,"split_cell":100.0,"bomber_drone":110.0}
+	var radius_map := {"scout":44.0, "attacker":44.0, "tank":44.0,"elite":44.0,
+	                   "phantom_dart":28.0,"fortress_walker":65.0,"split_cell":50.0,"bomber_drone":55.0}
+
+	var hp: int       = int(hp_map.get(key, 30))
+	var speed: float  = float(speed_map.get(key, 150.0))
+	var sz: float     = float(size_map.get(key, 90.0))
+	var radius: float = float(radius_map.get(key, 44.0))
+
 	var pos := Vector2(rng.randf_range(80.0, screen_size.x - 80.0), -80.0)
-	var sprite := AssetPaths.create_sprite(AssetPaths.ENEMIES[key], Vector2(90, 90), Color(0.9, 0.1, 0.2), 8)
+	var sprite := AssetPaths.create_sprite(AssetPaths.ENEMIES[key], Vector2(sz, sz), Color(0.9, 0.1, 0.2), 8)
 	sprite.position = pos
 	add_child(sprite)
-	enemies.append({"pos": pos, "hp": hp, "speed": speed, "sprite": sprite, "radius": 44.0, "kind": key})
+
+	var data := {"pos": pos, "hp": hp, "speed": speed, "sprite": sprite, "radius": radius, "kind": key}
+	if key == "bomber_drone":
+		data["shoot_timer"] = rng.randf_range(1.0, 2.5)
+		data["strafe_dir"]  = float(rng.randi_range(0, 1) * 2 - 1)
+		data["strafe_timer"] = rng.randf_range(1.5, 3.0)
+	enemies.append(data)
+
+
+func _spawn_split_cell_frag(from_pos: Vector2) -> void:
+	var offset := Vector2(rng.randf_range(-35.0, 35.0), rng.randf_range(-20.0, 20.0))
+	var pos := from_pos + offset
+	var sprite := AssetPaths.create_sprite(AssetPaths.ENEMIES["split_cell"], Vector2(55, 55), Color(0.2, 0.9, 0.2), 8)
+	sprite.position = pos
+	add_child(sprite)
+	enemies.append({"pos": pos, "hp": 20, "speed": 160.0, "sprite": sprite,
+	                "radius": 28.0, "kind": "split_cell_frag"})
+
+
+func _fire_bomber_shot(from: Vector2, target: Vector2) -> void:
+	var dir := (target - from).normalized()
+	var b := _create_bullet(from, dir, 0, 6, AssetPaths.PROJECTILES["boss_orb"], 210.0, 30.0)
+	enemy_bullets.append(b)
+
+
+func _update_enemy_bullets(delta: float) -> void:
+	var core_pos: Vector2 = base_sprite.position
+	for i in range(enemy_bullets.size() - 1, -1, -1):
+		var b: Dictionary = enemy_bullets[i]
+		var pos: Vector2 = b["pos"]
+		var vel: Vector2 = b["vel"]
+		pos += vel * delta
+		b["pos"] = pos
+		b["life"] = float(b["life"]) - delta
+		(b["sprite"] as Sprite2D).position = pos
+		if float(b["life"]) <= 0.0 or pos.x < -80 or pos.x > screen_size.x + 80 \
+				or pos.y < -80 or pos.y > screen_size.y + 80:
+			if is_instance_valid(b["sprite"]):
+				(b["sprite"] as Sprite2D).queue_free()
+			enemy_bullets.remove_at(i)
+			continue
+		# Hit core
+		if pos.distance_to(core_pos) < 42.0 + float(b["radius"]):
+			if core_shield_time > 0.0:
+				core_shield_time = maxf(0.0, core_shield_time - 1.0)
+				_spawn_effect(AssetPaths.EFFECTS["shield_bubble"], core_pos, Vector2(290, 290), 0.28)
+				if audio_manager != null:
+					audio_manager.play_sfx("shield_hit", -6.0)
+			else:
+				base_hp = max(0, base_hp - int(b["damage"]))
+				if audio_manager != null:
+					audio_manager.play_sfx("core_damage", -7.0)
+			if is_instance_valid(b["sprite"]):
+				(b["sprite"] as Sprite2D).queue_free()
+			enemy_bullets.remove_at(i)
 
 func _update_enemies(delta: float) -> void:
 	var stunned := emp_stun_timer > 0.0
@@ -3090,10 +3334,34 @@ func _update_enemies(delta: float) -> void:
 			target = players[i % players.size()]["pos"]
 		var pos: Vector2 = e["pos"]
 		var dir := (target - pos).normalized()
-		if not stunned:
+		var kind := String(e.get("kind", ""))
+
+		# ── Bomber Drone: hover at range and fire ─────────────────────
+		if kind == "bomber_drone":
+			if not stunned:
+				var dist := pos.distance_to(target)
+				if dist > 300.0:
+					pos += dir * float(e["speed"]) * delta
+				else:
+					var strafe_t: float = float(e.get("strafe_timer", 2.0)) - delta
+					if strafe_t <= 0.0:
+						e["strafe_dir"] = -float(e.get("strafe_dir", 1.0))
+						strafe_t = rng.randf_range(1.5, 3.0)
+					e["strafe_timer"] = strafe_t
+					var perp := Vector2(-dir.y, dir.x) * float(e.get("strafe_dir", 1.0))
+					pos += perp * float(e["speed"]) * 0.7 * delta
+					pos.x = clampf(pos.x, 60.0, screen_size.x - 60.0)
+				var shoot_t: float = float(e.get("shoot_timer", 2.5)) - delta
+				if shoot_t <= 0.0 and mode == GameMode.STORY:
+					_fire_bomber_shot(pos, target)
+					shoot_t = 2.5
+				e["shoot_timer"] = shoot_t
+		elif not stunned:
 			pos += dir * float(e["speed"]) * delta
+
 		e["pos"] = pos
 		(e["sprite"] as Sprite2D).position = pos
+
 		if int(e["hp"]) <= 0:
 			team_score += 20
 			_spawn_effect(AssetPaths.EFFECTS["explosion_small"], pos, Vector2(120, 120), 0.35)
@@ -3103,7 +3371,11 @@ func _update_enemies(delta: float) -> void:
 				(e["sprite"] as Sprite2D).queue_free()
 			enemies.remove_at(i)
 			if mode == GameMode.STORY:
-				_spawn_crystals_from_enemy(pos, String(e.get("kind", "scout")))
+				_spawn_crystals_from_enemy(pos, kind)
+				# Split Cell spawns 2 smaller fragments on death
+				if kind == "split_cell":
+					_spawn_split_cell_frag(pos)
+					_spawn_split_cell_frag(pos)
 		elif pos.y > screen_size.y + 100 or pos.distance_to(target) < 60.0:
 			if mode == GameMode.STORY and core_shield_time > 0.0:
 				core_shield_time = maxf(0.0, core_shield_time - 1.0)
@@ -3372,17 +3644,20 @@ func _update_effects(delta: float) -> void:
 			effects.remove_at(i)
 
 func _update_ui() -> void:
+	var in_story := (mode == GameMode.STORY)
+	if story_hud_bar != null:
+		story_hud_bar.visible = in_story
+
 	match mode:
 		GameMode.TITLE:
 			hud_label.text = ""
 			banner_label.text = ""
 		GameMode.STORY:
-			if story_fusion_active:
-				hud_label.text = "CO-OP DEFENSE\nFUSION %.0fs   BOMBS %d/%d   SCORE %d\nP1 POINTER+FIRE   P2 MOVE+BOMB" % [story_fusion_timer, bombs.size(), story_bomb_max_count, team_score]
-				banner_label.text = "P1: WASD POINTER + F CANNON   P2: ARROWS MOVE + L BOMB"
-			else:
-				hud_label.text = "CO-OP DEFENSE\nCORE %d   SHIELD %.0fs   SCORE %d\nCO-OP LINK %.0f%%" % [base_hp, core_shield_time, team_score, coop_link]
-				banner_label.text = "FUSION READY: G / K / SPACE" if coop_link >= 100.0 else "AZURE WING + SOLAR FANG"
+			# Hide legacy text HUD
+			hud_label.text = ""
+			banner_label.text = ""
+			# Update new compact bar
+			_update_story_hud_bar()
 		GameMode.ASTRAL_COURT:
 			hud_label.text = "ASTRAL COURT\nTIME %.0f   P1 HP %d   P2 HP %d\nP1 CORE %.0f%%   P2 CORE %.0f%%" % [arena_time, arena_p1_hp, arena_p2_hp, p1_core, p2_core]
 			banner_label.text = "CONTROL THE STELLAR CORE"
@@ -3400,6 +3675,55 @@ func _update_ui() -> void:
 			hud_label.text = network_text
 		else:
 			hud_label.text += "\n" + network_text
+
+
+func _update_story_hud_bar() -> void:
+	if story_hud_bar == null:
+		return
+	var fusion := story_fusion_active
+
+	# Core HP bar
+	var hp_ratio := clampf(float(base_hp) / float(CORE_HP_MAX), 0.0, 1.0)
+	story_core_bar_fill.size.x = 130.0 * hp_ratio
+	story_core_label.text = "%d/%d" % [base_hp, CORE_HP_MAX]
+	var r := 1.0 - hp_ratio * 0.5
+	var g := hp_ratio * 0.8
+	story_core_bar_fill.color = Color(r, g, 0.15)
+
+	# Shield
+	if core_shield_time > 0.0:
+		story_shield_label.text = "%.0fs" % core_shield_time
+		story_shield_label.add_theme_color_override("font_color", Color(0.4, 0.85, 1.0))
+	else:
+		story_shield_label.text = "--"
+		story_shield_label.add_theme_color_override("font_color", Color(0.30, 0.40, 0.50))
+
+	# Score
+	story_score_label.text = "%d" % team_score
+
+	# CO-OP LINK bar
+	if fusion:
+		story_link_bar_fill.color = Color(1.0, 0.80, 0.20)
+		story_link_bar_fill.size.x = 140.0
+		story_link_label.visible = false
+		story_fusion_label.visible = true
+		story_fusion_label.text = "FUSION  %.0fs  💣%d/%d" % [story_fusion_timer, bombs.size(), story_bomb_max_count]
+		story_mode_label.text = "FUSION MODE"
+		story_mode_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20))
+	else:
+		var lk := clampf(coop_link / 100.0, 0.0, 1.0)
+		story_link_bar_fill.size.x = 140.0 * lk
+		if coop_link >= 100.0:
+			story_link_bar_fill.color = Color(1.0, 0.95, 0.20)
+			story_link_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.20))
+		else:
+			story_link_bar_fill.color = Color(0.20, 1.0, 0.65)
+			story_link_label.add_theme_color_override("font_color", Color(0.20, 1.0, 0.65))
+		story_link_label.text = "%.0f%%" % coop_link
+		story_link_label.visible = true
+		story_fusion_label.visible = false
+		story_mode_label.text = "CO-OP DEFENSE"
+		story_mode_label.add_theme_color_override("font_color", Color(0.55, 0.80, 1.0))
 
 
 func _print_network_input_debug() -> void:

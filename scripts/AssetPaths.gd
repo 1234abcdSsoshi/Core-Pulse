@@ -7,10 +7,14 @@ const PLAYERS := {
 }
 
 const ENEMIES := {
-	"scout": "res://assets/enemies/enemy_scout_drone.png",
-	"attacker": "res://assets/enemies/enemy_attacker_drone.png",
-	"tank": "res://assets/enemies/enemy_tank_unit.png",
-	"elite": "res://assets/enemies/enemy_elite_unit.png",
+	"scout":           "res://assets/enemies/enemy_scout_drone.png",
+	"attacker":        "res://assets/enemies/enemy_attacker_drone.png",
+	"tank":            "res://assets/enemies/enemy_tank_unit.png",
+	"elite":           "res://assets/enemies/enemy_elite_unit.png",
+	"phantom_dart":    "res://assets/enemies/enemy_phantom_dart.png",
+	"fortress_walker": "res://assets/enemies/enemy_fortress_walker.png",
+	"split_cell":      "res://assets/enemies/enemy_split_cell.png",
+	"bomber_drone":    "res://assets/enemies/enemy_bomber_drone.png",
 }
 
 const BOSSES := {
