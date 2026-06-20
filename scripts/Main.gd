@@ -3711,12 +3711,6 @@ func _update_ui() -> void:
 		var remote_player_id := 2 if online_local_player_id == 1 else 1
 		hud_label.text += "\nFAKE ONLINE: LOCAL P%d / REMOTE P%d" % [online_local_player_id, remote_player_id]
 
-	var network_text := _get_network_debug_text()
-	if network_text != "":
-		if mode == GameMode.TITLE:
-			hud_label.text = network_text
-		else:
-			hud_label.text += "\n" + network_text
 
 
 func _update_story_hud_bar() -> void:
