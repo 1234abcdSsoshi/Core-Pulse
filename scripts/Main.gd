@@ -1198,11 +1198,14 @@ func _rebuild_shop_ui() -> void:
 	shop_layer.add_child(title)
 
 	# ── 所持クリスタル表示 ──
+	var crystal_hdr_icon := AssetPaths.create_sprite(AssetPaths.ITEMS["crystal"], Vector2(32, 32), Color(0.4, 1.0, 0.9))
+	crystal_hdr_icon.position = Vector2(screen_size.x - 336, 34)
+	shop_layer.add_child(crystal_hdr_icon)
 	var clbl := Label.new()
-	clbl.text = "💎 %d" % crystals
-	clbl.position = Vector2(screen_size.x - 280, 22)
-	clbl.size = Vector2(200, 44)
-	clbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	clbl.text = "%d" % crystals
+	clbl.position = Vector2(screen_size.x - 300, 20)
+	clbl.size = Vector2(126, 48)
+	clbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	clbl.add_theme_font_size_override("font_size", 34)
 	clbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.9))
 	shop_layer.add_child(clbl)
@@ -1432,23 +1435,31 @@ func _draw_shop_card(id: String, info: Dictionary, cx: float, cy: float, card_w:
 	sep3.color = Color(accent.r, accent.g, accent.b, 0.22)
 	shop_layer.add_child(sep3)
 
-	# 価格
+	# 価格（クリスタルアイコン＋数値）
+	var price_col := Color(0.3, 1.0, 0.65) if can_buy else Color(0.35, 0.38, 0.42)
+	var price_icon := AssetPaths.create_sprite(AssetPaths.ITEMS["crystal"], Vector2(24, 24), price_col)
+	price_icon.position = Vector2(cx + card_w * 0.5 - 32.0, cy + card_h - 91.0)
+	shop_layer.add_child(price_icon)
 	var price_lbl := Label.new()
-	price_lbl.text = "💎  %d" % int(info["price"])
-	price_lbl.position = Vector2(cx, cy + card_h - 102)
-	price_lbl.size = Vector2(card_w, 36)
-	price_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	price_lbl.text = "%d" % int(info["price"])
+	price_lbl.position = Vector2(cx + card_w * 0.5 - 4.0, cy + card_h - 102)
+	price_lbl.size = Vector2(60, 36)
+	price_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	price_lbl.add_theme_font_size_override("font_size", 28)
-	price_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.65) if can_buy else Color(0.35, 0.38, 0.42))
+	price_lbl.add_theme_color_override("font_color", price_col)
 	shop_layer.add_child(price_lbl)
 
 	# 購入可否テキスト
 	if not can_buy:
+		var need := int(info["price"]) - crystals
+		var lack_icon := AssetPaths.create_sprite(AssetPaths.ITEMS["crystal"], Vector2(16, 16), Color(0.6, 0.3, 0.3))
+		lack_icon.position = Vector2(cx + card_w * 0.5 - 54.0, cy + card_h - 57.0)
+		shop_layer.add_child(lack_icon)
 		var lack_lbl := Label.new()
-		lack_lbl.text = "あと 💎 %d 必要" % (int(info["price"]) - crystals)
-		lack_lbl.position = Vector2(cx, cy + card_h - 66)
-		lack_lbl.size = Vector2(card_w, 28)
-		lack_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lack_lbl.text = "あと %d 必要" % need
+		lack_lbl.position = Vector2(cx + card_w * 0.5 - 34.0, cy + card_h - 66)
+		lack_lbl.size = Vector2(120, 28)
+		lack_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		lack_lbl.add_theme_font_size_override("font_size", 16)
 		lack_lbl.add_theme_color_override("font_color", Color(0.6, 0.3, 0.3))
 		shop_layer.add_child(lack_lbl)
