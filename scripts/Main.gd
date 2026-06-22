@@ -112,6 +112,8 @@ var story_wave := 1
 var result_title := ""
 var result_message := ""
 var game_over := false
+var debug_show_hitboxes: bool = false
+var _dbg_node: Node2D
 
 var enemy_spawn_timer := 1.2
 var item_spawn_timer := 5.0
@@ -130,7 +132,7 @@ var player_specs := {
 		"rapid_interval": 0.07,
 		"damage": 8,
 		"bullet_size": 28.0,
-		"power_mode": "piercing_laser"
+		"power_mode": "giant_bullet"
 	},
 	2: {
 		"name": "Solar Fang",
@@ -320,7 +322,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					get_viewport().set_input_as_handled()
 				return
 
-			if key_event.keycode == KEY_F6:
+			if key_event.keycode == KEY_F2:
+				debug_show_hitboxes = !debug_show_hitboxes
+				get_viewport().set_input_as_handled()
+			elif key_event.keycode == KEY_F6:
 				_print_network_input_debug()
 				get_viewport().set_input_as_handled()
 			elif key_event.keycode == KEY_F7:
@@ -362,6 +367,7 @@ func _ready() -> void:
 	if audio_manager == null:
 		audio_manager = AudioManagerScript.new()
 		add_child(audio_manager)
+	_setup_debug_overlay()
 	_show_title()
 
 func _process(delta: float) -> void:
@@ -370,6 +376,8 @@ func _process(delta: float) -> void:
 	_update_online_status_hud()
 
 	_update_ui()
+	if _dbg_node != null:
+		_dbg_node.queue_redraw()
 
 	if game_over:
 		if Input.is_key_pressed(KEY_R):
@@ -2827,23 +2835,15 @@ func _shoot(player_id: int) -> void:
 	var power: float = float(p.get("power", 0.0))
 	var is_piercing := false
 
-	# Step B: personalized Power Boost behavior.
+	# Step B: Power Boost — giant bullet for both P1 and P2.
 	if mode == GameMode.STORY and power > 0.0:
-		if String(p["power_mode"]) == "piercing_laser":
-			# P1: Azure Wing turns into a fast piercing laser.
-			damage += 4
-			shot_speed *= 1.18
-			bullet_size = 42.0
-			is_piercing = true
-		elif String(p["power_mode"]) == "giant_bullet":
-			# P2: Solar Fang fires a huge heavy projectile.
+		if String(p["power_mode"]) == "giant_bullet":
 			damage += 20
 			bullet_size *= 1.65
 			shot_speed *= 0.92
 
-	# Step B: personalized Rapid Fire behavior.
-	# P2 rapid fire becomes a 3-shot burst. P1 simply fires extremely fast.
-	if mode == GameMode.STORY and player_id == 2 and float(p["rapid"]) > 0.0:
+	# Step B: Rapid Fire — 3-shot spread burst for both P1 and P2.
+	if mode == GameMode.STORY and float(p["rapid"]) > 0.0:
 		for angle_offset in [-0.18, 0.0, 0.18]:
 			var burst_dir := direction.rotated(angle_offset)
 			var burst_bullet: Dictionary = _create_bullet(origin + burst_dir * 58.0, burst_dir, player_id, damage, path, shot_speed, bullet_size, is_piercing)
@@ -3485,9 +3485,7 @@ func _apply_item(key: String, p: Dictionary) -> void:
 
 		"rapid_fire":
 			# Step B: Rapid Fire is personalized.
-			# P1: ultra-fast precision fire.
-			# P2: slower but powerful 3-shot burst.
-			p["rapid"] = 7.0 if player_id == 1 else 6.0
+			p["rapid"] = 6.0
 			if audio_manager != null:
 				audio_manager.play_sfx("item_rapid_fire", -5.0)
 
@@ -3866,3 +3864,51 @@ func _game_over(title: String, message: String = "") -> void:
 	game_over_layer.visible = true
 	game_over_title.text = result_title
 	game_over_detail.text = result_message
+
+
+class _DebugDraw extends Node2D:
+	var main_ref: Node
+
+	func _draw() -> void:
+		if main_ref == null or not main_ref._debug_active():
+			return
+
+		var player_colors := [Color(0.0, 1.0, 1.0, 0.45), Color(1.0, 0.65, 0.0, 0.45)]
+		for i in range((main_ref.players as Array).size()):
+			var p: Dictionary = (main_ref.players as Array)[i]
+			var col: Color = player_colors[i] if i < player_colors.size() else Color(0.0, 1.0, 1.0, 0.45)
+			draw_circle(p["pos"], float(p["radius"]), col)
+			draw_arc(p["pos"], float(p["radius"]), 0.0, TAU, 32, col.lightened(0.5), 1.5)
+
+		for e in (main_ref.enemies as Array):
+			draw_circle(e["pos"], float(e["radius"]), Color(1.0, 0.2, 0.2, 0.35))
+			draw_arc(e["pos"], float(e["radius"]), 0.0, TAU, 32, Color(1.0, 0.3, 0.3, 0.9), 1.5)
+
+		for b in (main_ref.bullets as Array):
+			draw_circle(b["pos"], float(b["radius"]), Color(1.0, 1.0, 0.0, 0.55))
+
+		for eb in (main_ref.enemy_bullets as Array):
+			draw_circle(eb["pos"], float(eb["radius"]), Color(1.0, 0.2, 1.0, 0.55))
+
+		var core_spr: Node = main_ref.base_sprite
+		if core_spr != null:
+			var cpos: Vector2 = (core_spr as Node2D).position
+			draw_circle(cpos, 42.0, Color(0.4, 0.8, 1.0, 0.30))
+			draw_arc(cpos, 42.0, 0.0, TAU, 48, Color(0.4, 0.8, 1.0, 0.95), 2.0)
+
+		for item in (main_ref.items as Array):
+			draw_circle(item["pos"], float(item["radius"]), Color(0.2, 1.0, 0.4, 0.35))
+			draw_arc(item["pos"], float(item["radius"]), 0.0, TAU, 32, Color(0.3, 1.0, 0.5, 0.9), 1.5)
+
+
+func _debug_active() -> bool:
+	return debug_show_hitboxes and mode != GameMode.TITLE
+
+
+func _setup_debug_overlay() -> void:
+	var canvas := CanvasLayer.new()
+	canvas.layer = 99
+	add_child(canvas)
+	_dbg_node = _DebugDraw.new()
+	(_dbg_node as _DebugDraw).main_ref = self
+	canvas.add_child(_dbg_node)
