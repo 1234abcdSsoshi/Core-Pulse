@@ -224,7 +224,6 @@ var raid_weak_offsets: Array[Vector2] = [Vector2(-240, 70), Vector2(0, 92), Vect
 # Visual nodes
 var bg_sprite: Sprite2D
 var base_sprite: Sprite2D
-var base_ring: Line2D
 var base_shield_sprite: Sprite2D
 var astral_ring_sprite: Sprite2D
 var arena_obstacle_sprites: Array[Sprite2D] = []
@@ -807,20 +806,7 @@ func _setup_world() -> void:
 	base_sprite.position = Vector2(screen_size.x * 0.5, screen_size.y - 130)
 	add_child(base_sprite)
 
-	# Circular ring border matching the round core image
-	base_ring = Line2D.new()
-	base_ring.width = 3.0
-	base_ring.default_color = Color(0.35, 0.90, 1.0, 0.65)
-	base_ring.z_index = 1
-	base_ring.visible = false
-	var ring_r := 90.0
-	for i in range(65):
-		var angle := (float(i) / 64.0) * TAU
-		base_ring.add_point(Vector2(cos(angle), sin(angle)) * ring_r)
-	base_ring.position = base_sprite.position
-	add_child(base_ring)
-
-	base_shield_sprite = AssetPaths.create_sprite(AssetPaths.EFFECTS["shield_bubble"], Vector2(260, 260), Color(0.5, 0.9, 1.0, 0.7), 2)
+base_shield_sprite = AssetPaths.create_sprite(AssetPaths.EFFECTS["shield_bubble"], Vector2(260, 260), Color(0.5, 0.9, 1.0, 0.7), 2)
 	base_shield_sprite.position = base_sprite.position
 	base_shield_sprite.visible = false
 	add_child(base_shield_sprite)
@@ -2627,7 +2613,7 @@ func _start_story() -> void:
 	_clear_game_objects()
 	_set_background(AssetPaths.BACKGROUNDS["space"])
 	base_sprite.visible = true
-	base_ring.visible = true
+
 	astral_ring_sprite.visible = false
 	boss_sprite.visible = false
 	boss_hp_back.visible = false
@@ -2658,7 +2644,7 @@ func _start_astral_court() -> void:
 	_clear_game_objects()
 	_set_background(AssetPaths.BACKGROUNDS["astral"])
 	base_sprite.visible = false
-	base_ring.visible = false
+
 	base_shield_sprite.visible = false
 	astral_ring_sprite.visible = true
 	boss_sprite.visible = false
@@ -2695,7 +2681,7 @@ func _start_raid() -> void:
 	_clear_game_objects()
 	_set_background(AssetPaths.BACKGROUNDS["raid"])
 	base_sprite.visible = false
-	base_ring.visible = false
+
 	base_shield_sprite.visible = false
 	astral_ring_sprite.visible = false
 	for s in arena_obstacle_sprites:
