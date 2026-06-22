@@ -806,7 +806,7 @@ func _setup_world() -> void:
 	base_sprite.position = Vector2(screen_size.x * 0.5, screen_size.y - 130)
 	add_child(base_sprite)
 
-base_shield_sprite = AssetPaths.create_sprite(AssetPaths.EFFECTS["shield_bubble"], Vector2(260, 260), Color(0.5, 0.9, 1.0, 0.7), 2)
+	base_shield_sprite = AssetPaths.create_sprite(AssetPaths.EFFECTS["shield_bubble"], Vector2(260, 260), Color(0.5, 0.9, 1.0, 0.7), 2)
 	base_shield_sprite.position = base_sprite.position
 	base_shield_sprite.visible = false
 	add_child(base_shield_sprite)
