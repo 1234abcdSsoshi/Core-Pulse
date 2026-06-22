@@ -1,4 +1,4 @@
-﻿extends Node2D
+extends Node2D
 
 const AssetPaths = preload("res://scripts/AssetPaths.gd")
 const AudioManagerScript = preload("res://scripts/AudioManager.gd")
@@ -369,10 +369,11 @@ func _process(delta: float) -> void:
 	_update_network_input_sending(delta)
 	_update_online_status_hud()
 
+	_update_ui()
+
 	if game_over:
 		if Input.is_key_pressed(KEY_R):
 			get_tree().reload_current_scene()
-		_update_ui()
 		_update_effects(delta)
 		return
 
@@ -405,8 +406,6 @@ func _process(delta: float) -> void:
 	# RAID -> _update_raid(delta)
 	if current_stage != null:
 		current_stage.update_stage(delta)
-
-	_update_ui()
 
 
 func _setup_input_abstraction() -> void:
@@ -3302,13 +3301,13 @@ func _spawn_enemy() -> void:
 	var key: String = pool[rng.randi_range(0, pool.size() - 1)]
 
 	var hp_map     := {"scout":18,  "attacker":34,  "tank":70,   "elite":110,
-	                   "phantom_dart":10, "fortress_walker":350, "split_cell":50, "bomber_drone":65}
+					   "phantom_dart":10, "fortress_walker":350, "split_cell":50, "bomber_drone":65}
 	var speed_map  := {"scout":210.0,"attacker":150.0,"tank":90.0,"elite":125.0,
-	                   "phantom_dart":380.0,"fortress_walker":45.0,"split_cell":100.0,"bomber_drone":75.0}
+					   "phantom_dart":380.0,"fortress_walker":45.0,"split_cell":100.0,"bomber_drone":75.0}
 	var size_map   := {"scout":90.0, "attacker":90.0, "tank":90.0,"elite":90.0,
-	                   "phantom_dart":60.0,"fortress_walker":130.0,"split_cell":100.0,"bomber_drone":110.0}
+					   "phantom_dart":60.0,"fortress_walker":130.0,"split_cell":100.0,"bomber_drone":110.0}
 	var radius_map := {"scout":44.0, "attacker":44.0, "tank":44.0,"elite":44.0,
-	                   "phantom_dart":28.0,"fortress_walker":65.0,"split_cell":50.0,"bomber_drone":55.0}
+					   "phantom_dart":28.0,"fortress_walker":65.0,"split_cell":50.0,"bomber_drone":55.0}
 
 	var hp: int       = int(hp_map.get(key, 30))
 	var speed: float  = float(speed_map.get(key, 150.0))
@@ -3335,7 +3334,7 @@ func _spawn_split_cell_frag(from_pos: Vector2) -> void:
 	sprite.position = pos
 	add_child(sprite)
 	enemies.append({"pos": pos, "hp": 20, "speed": 160.0, "sprite": sprite,
-	                "radius": 28.0, "kind": "split_cell_frag"})
+					"radius": 28.0, "kind": "split_cell_frag"})
 
 
 func _fire_bomber_shot(from: Vector2, target: Vector2) -> void:
