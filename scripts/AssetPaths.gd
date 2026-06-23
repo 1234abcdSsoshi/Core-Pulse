@@ -82,6 +82,15 @@ const STAGES := {
 	"arena_obstacle": "res://assets/stages/stage_arena_obstacle.png",
 }
 
+const ENEMY_GATES := {
+	"gate_0":  "res://assets/stages/stage_enemy_core.png",
+	"gate_20": "res://assets/stages/stage_enemy_core_20.png",
+	"gate_40": "res://assets/stages/stage_enemy_core_40.png",
+	"gate_60": "res://assets/stages/stage_enemy_core_60.png",
+	"gate_80": "res://assets/stages/stage_enemy_core_80.png",
+	"gate_95": "res://assets/stages/stage_enemy_core_95.png",
+}
+
 const UI := {
 	"hp": "res://assets/ui/ui_icon_hp.png",
 	"shield": "res://assets/ui/ui_icon_shield.png",
@@ -176,3 +185,32 @@ static func fit_sprite(sprite: Sprite2D, desired_size: Vector2) -> void:
 		return
 	var scale_factor := minf(desired_size.x / tex_size.x, desired_size.y / tex_size.y)
 	sprite.scale = Vector2(scale_factor, scale_factor)
+
+static func make_life_core_texture() -> Texture2D:
+	const SZ := 32
+	var img := Image.create(SZ, SZ, false, Image.FORMAT_RGBA8)
+	var half := SZ * 0.5
+	for y in range(SZ):
+		for x in range(SZ):
+			var px := float(x) + 0.5 - half
+			var py := float(y) + 0.5 - half
+			var d2 := px * px + py * py
+			var R := half * 0.88
+			if d2 > R * R:
+				img.set_pixel(x, y, Color(0.0, 0.0, 0.0, 0.0))
+				continue
+			var d := sqrt(d2)
+			var nx := px / R
+			var ny := py / R
+			var nz := sqrt(maxf(0.0, 1.0 - nx * nx - ny * ny))
+			var diff := maxf(0.0, nx * (-0.5774) + ny * (-0.5774) + nz * 0.5774)
+			var dot2 := nx * (-0.5774) + ny * (-0.5774) + nz * 0.5774
+			var rz := 2.0 * dot2 * nz - 0.5774
+			var spec := pow(maxf(0.0, rz), 28.0)
+			var rim := pow(1.0 - nz, 2.0)
+			var cr := minf(1.0, 0.02 + 0.18 * diff + 0.95 * spec + 0.30 * rim)
+			var cg := minf(1.0, 0.55 + 0.30 * diff + 0.85 * spec + 0.60 * rim)
+			var cb := minf(1.0, 0.90 + 0.05 * diff + 0.75 * spec + 0.80 * rim)
+			var edge := minf(1.0, (R - d) * 2.5)
+			img.set_pixel(x, y, Color(cr, cg, cb, edge))
+	return ImageTexture.create_from_image(img)

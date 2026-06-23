@@ -116,6 +116,15 @@ var debug_show_hitboxes: bool = false
 var _dbg_node: Node2D
 var _entity_id_counter: int = 0
 
+const PLAYER_LIVES_MAX := 5
+const PLAYER_INV_DURATION := 1.5
+var player_lives: Array[int] = [5, 5]
+var player_inv_timer: Array[float] = [0.0, 0.0]
+
+const STORY_INTRO_DURATION := 1.8
+var story_intro_active := false
+var story_intro_timer := 0.0
+
 var enemy_spawn_timer := 1.2
 var item_spawn_timer := 5.0
 var shoot_cd_p1 := 0.0
@@ -263,6 +272,18 @@ var link_fill: Sprite2D
 var boss_hp_back: Sprite2D
 var boss_hp_fill: ColorRect
 
+# Stage 1 gate
+var gate_sprite: Sprite2D = null
+var gate_hp := 0
+var gate_pos := Vector2.ZERO
+var gate_open := false
+var gate_open_timer := 0.0
+var gate_destroyed := false
+var gate_clear_timer := 0.0
+const GATE_HP_MAX_S1 := 1000
+const GATE_OPEN_DELAY := 1.5
+const GATE_CLEAR_DELAY := 3.0
+
 # Story HUD bar (top compact bar)
 var story_hud_container: Control      # master container — hide to remove all
 var story_hud_bar: ColorRect
@@ -280,6 +301,13 @@ var story_link_bar_bg: ColorRect
 var story_link_bar_fill: ColorRect
 var story_link_label: Label           # "XX%" or "💣x/y"
 var story_fusion_label: Label
+var story_p1_life_segs: Array = []
+var story_p1_life_hi: Array = []
+var story_p2_life_segs: Array = []
+var story_p2_life_hi: Array = []
+var story_gate_bar_bg: ColorRect
+var story_gate_bar_fill: ColorRect
+var story_gate_label: Label
 var core_shield_max := 0.0            # tracks max shield for bar ratio
 
 # Step 13: 繧ｪ繝ｳ繝ｩ繧､繝ｳ繝励Ξ繧､荳ｭ縺縺題｡ｨ遉ｺ縺吶ｋ蟆上＆縺ｪ繧ｹ繝・・繧ｿ繧ｹHUD縺ｧ縺吶
@@ -1370,7 +1398,7 @@ func _rebuild_shop_ui() -> void:
 
 	# ── キーヒント ──
 	var hint := Label.new()
-	hint.text = "Tab / ESC  でゲームに戻る"
+	hint.text = "Tab / ESC  to return to game"
 	hint.position = Vector2(0, screen_size.y - 40)
 	hint.size = Vector2(screen_size.x, 32)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1412,9 +1440,9 @@ func _draw_shop_weapons_page(catalog: Dictionary) -> void:
 
 	# 現在の装備状況
 	var status_lbl := Label.new()
-	status_lbl.text = "現在の装備 —  P1: %s   P2: %s" % [
-		p1_weapon if p1_weapon != "" else "なし",
-		p2_weapon if p2_weapon != "" else "なし"
+	status_lbl.text = "Equipped —  P1: %s   P2: %s" % [
+		p1_weapon if p1_weapon != "" else "None",
+		p2_weapon if p2_weapon != "" else "None"
 	]
 	status_lbl.position = Vector2(0, cy - 36)
 	status_lbl.size = Vector2(screen_size.x, 30)
@@ -1441,7 +1469,7 @@ func _draw_shop_turrets_page(catalog: Dictionary) -> void:
 
 	# 設置数表示
 	var status_lbl := Label.new()
-	status_lbl.text = "設置数: %d / %d  （購入すると自動でコア周囲に配置されます）" % [turrets.size(), max_turrets]
+	status_lbl.text = "Turrets: %d / %d  (auto-placed around core on purchase)" % [turrets.size(), max_turrets]
 	status_lbl.position = Vector2(0, cy - 36)
 	status_lbl.size = Vector2(screen_size.x, 30)
 	status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1563,7 +1591,7 @@ func _draw_shop_card(id: String, info: Dictionary, cx: float, cy: float, card_w:
 		lack_icon.position = Vector2(cx + card_w * 0.5 - 54.0, cy + card_h - 57.0)
 		shop_layer.add_child(lack_icon)
 		var lack_lbl := Label.new()
-		lack_lbl.text = "あと %d 必要" % need
+		lack_lbl.text = "Need %d more" % need
 		lack_lbl.position = Vector2(cx + card_w * 0.5 - 34.0, cy + card_h - 66)
 		lack_lbl.size = Vector2(120, 28)
 		lack_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -1574,7 +1602,7 @@ func _draw_shop_card(id: String, info: Dictionary, cx: float, cy: float, card_w:
 	# BUYボタン
 	if can_buy:
 		var btn := Button.new()
-		btn.text = "購入する  BUY"
+		btn.text = "BUY"
 		btn.position = Vector2(cx + 36, cy + card_h - 54)
 		btn.size = Vector2(card_w - 72, 44)
 		btn.add_theme_font_size_override("font_size", 20)
@@ -1706,68 +1734,68 @@ func _build_shop_catalog() -> Dictionary:
 	return {
 		"core_repair": {
 			"name": "CORE REPAIR", "price": 20,
-			"short": "コアのHPを回復する",
-			"detail": "コアのHPを +40 回復します。\n\nHPが危険な状態のときに使うと\n生存率が大きく上がります。\n\n上限（CORE_HP_MAX）を\n超えては回復しません。",
+			"short": "Restore Core HP by +40",
+			"detail": "Restores Core HP by +40.\n\nUse when HP is critical to\nsignificantly improve survival.\n\nCannot exceed the\nmaximum Core HP.",
 		},
 		"mega_bomb": {
 			"name": "MEGA BOMB", "price": 35,
-			"short": "画面上の全敵を一掃する",
-			"detail": "購入した瞬間、フィールド上に\n存在する全ての敵のHPを 0 に\nして即座に撃破します。\n\n窮地の切り札として有効です。\nクリスタルも大量にドロップします。",
+			"short": "Wipe all enemies on screen",
+			"detail": "Instantly destroys all enemies\non the field when purchased,\nsetting their HP to 0.\n\nA powerful last resort.\nDrops a large amount of crystals.",
 		},
 		"crystal_magnet": {
 			"name": "CRYSTAL MAGNET", "price": 15,
-			"short": "クリスタルの吸引範囲を3倍に",
-			"detail": "60秒間、クリスタルの自動吸引\n範囲が 120px → 360px に広がります。\n\n遠くに落ちたクリスタルも\n自動で集めてくれるため、\n序盤の資金集めに最適です。",
+			"short": "Triple crystal pickup range",
+			"detail": "For 60 seconds, crystal auto-pickup\nrange expands from 120px to 360px.\n\nAutomatically collects distant\ncrystals — ideal for\nearly-game resource farming.",
 		},
 		"overclock": {
 			"name": "OVERCLOCK", "price": 30,
-			"short": "射撃速度を30秒間1.5倍に",
-			"detail": "P1・P2 両機体の射撃速度を\n30秒間 1.5倍に強化します。\n\nRapid Fire アイテムと\n組み合わせることで\nさらに高い連射が可能です。",
+			"short": "Fire rate x1.5 for 30 seconds",
+			"detail": "Boosts fire rate of both\nP1 and P2 by 1.5x for 30 seconds.\n\nCombine with the Rapid Fire item\nfor even higher fire rates.",
 		},
 		"emp_burst": {
 			"name": "EMP BURST", "price": 25,
-			"short": "全敵を5秒間スタンさせる",
-			"detail": "購入した瞬間、フィールド上の\n全ての敵の動きと攻撃を\n5秒間完全に停止させます。\n\nコアへの突撃を止めたいときや\nフュージョンを溜めたいときに。",
+			"short": "Stun all enemies for 5 seconds",
+			"detail": "When purchased, completely\nstops all enemies on the field\nfor 5 seconds.\n\nUseful to stop core rushes\nor to build up the fusion gauge.",
 		},
 		"side_cannon": {
 			"name": "SIDE CANNON", "price": 25,
-			"short": "左右に追加弾を発射",
-			"detail": "通常ショットに加えて、\n左右斜め方向に弾を 各1発\n同時に発射します。\n\n横から迫る敵に対して\n自動で対応できます。\n\n装備スロット: 1機体につき1種",
+			"short": "Fire extra shots left and right",
+			"detail": "In addition to normal shots,\nfires 1 bullet each to the\nleft and right diagonals.\n\nAutomatically handles\nenemies approaching from the sides.\n\nEquip slot: 1 per ship",
 		},
 		"spread_shot": {
 			"name": "SPREAD SHOT", "price": 30,
-			"short": "左右25°に追加弾2発",
-			"detail": "通常ショットに加えて、\n左右 25° に広がる弾を\n各1発発射します（計2発追加）。\n\n広い範囲をカバーでき、\n複数の敵が並んでいるときに\n特に効果的です。\n\n装備スロット: 1機体につき1種",
+			"short": "Fire 2 extra shots at +/-25 deg",
+			"detail": "In addition to normal shots,\nfires 1 bullet each spread\n25 degrees left and right.\n\nCovers a wide area and is\nespecially effective against\nmultiple lined-up enemies.\n\nEquip slot: 1 per ship",
 		},
 		"homing_missile": {
 			"name": "HOMING MISSILE", "price": 45,
-			"short": "2.5秒ごとに追尾ミサイルを発射",
-			"detail": "2.5秒ごとに、フィールド上で\n最も近い敵へ自動追尾する\nミサイルを発射します。\n\n操作は不要で完全自動です。\nタンク・エリートなど\n硬い敵に特に有効です。\n\n装備スロット: 1機体につき1種",
+			"short": "Fire homing missiles every 2.5s",
+			"detail": "Every 2.5 seconds, automatically\nfires a homing missile that\ntracks the nearest enemy.\n\nFully automatic — no input needed.\nEspecially effective against\ntough enemies like Tank and Elite.\n\nEquip slot: 1 per ship",
 		},
 		"twin_laser": {
 			"name": "TWIN LASER", "price": 60,
-			"short": "平行した2本の追加レーザー",
-			"detail": "通常ショットに加えて、\n機体の左右から平行した\nレーザー弾を各1発追加発射。\n\nダメージは通常弾と同等で、\n正面の敵に対する\n実質的な火力が大幅に向上します。\n\n装備スロット: 1機体につき1種",
+			"short": "2 parallel extra laser shots",
+			"detail": "In addition to normal shots,\nfires parallel laser bullets\nfrom the left and right of the ship.\n\nDamage equals normal shots,\ngreatly increasing effective\nfirepower against frontal enemies.\n\nEquip slot: 1 per ship",
 		},
 		"auto_cannon": {
 			"name": "AUTO CANNON", "price": 40,
-			"short": "最寄りの敵に1.2秒ごと射撃",
-			"detail": "コア周囲に砲台を1基設置します。\n\n1.2秒ごとに、フィールド上で\n最も近い敵へ自動的に弾を\n発射し続けます。\n\n操作不要で常時稼働する\n最もバランスの良いタレットです。\n\n最大設置数: 3基",
+			"short": "Shoot nearest enemy every 1.2s",
+			"detail": "Deploys a turret around the core.\n\nEvery 1.2 seconds, automatically\nfires at the nearest enemy\non the field.\n\nAlways active, no input needed —\nthe most well-balanced turret.\n\nMax deployed: 3",
 		},
 		"laser_tower": {
 			"name": "LASER TOWER", "price": 55,
-			"short": "連続レーザーで即時ダメージ",
-			"detail": "コア周囲にレーザー砲台を設置。\n\n0.08秒ごとに最寄りの敵へ\n連続ダメージを与えます。\n射撃間隔が非常に短く、\n高速の敵も逃さず撃ち続けます。\n\nスカウト・アタッカーなど\n素早い敵の処理に最適です。\n\n最大設置数: 3基",
+			"short": "Continuous laser instant damage",
+			"detail": "Deploys a laser turret around the core.\n\nDeals continuous damage to the\nnearest enemy every 0.08 seconds.\nVery short interval — won't let\neven fast enemies escape.\n\nBest for eliminating fast enemies\nlike Scouts and Attackers.\n\nMax deployed: 3",
 		},
 		"missile_pod": {
 			"name": "MISSILE POD", "price": 70,
-			"short": "3.5秒ごとに敵3体へミサイル",
-			"detail": "コア周囲にミサイルポッドを設置。\n\n3.5秒ごとに、近くの敵 3体を\n同時に追尾するミサイルを\n一斉発射します。\n\n範囲攻撃に近い効果があり、\n複数のタンクやエリートが\n同時に来る場面で力を発揮します。\n\n最大設置数: 3基",
+			"short": "3 homing missiles every 3.5s",
+			"detail": "Deploys a missile pod around the core.\n\nEvery 3.5 seconds, simultaneously\nlaunches homing missiles at\n3 nearby enemies.\n\nNear area-attack effectiveness —\nshines when multiple Tanks\nor Elites approach at once.\n\nMax deployed: 3",
 		},
 		"shield_wall": {
 			"name": "SHIELD WALL", "price": 35,
-			"short": "コアに近い敵を8秒に1回弾く",
-			"detail": "コア周囲に防壁ユニットを設置。\n\n8秒に1回、コアに200px以内に\n近づいた敵を自動的に弾き飛ばします。\n\nダメージは与えませんが、\n敵の突撃をリセットする\n防衛的なタレットです。\nCore Repairと組み合わせると効果的。\n\n最大設置数: 3基",
+			"short": "Repel nearby enemies every 8s",
+			"detail": "Deploys a barrier unit around the core.\n\nEvery 8 seconds, automatically\nknocks back enemies within 200px.\n\nDeals no damage but resets\nenemy rushes — a defensive turret.\nCombines well with Core Repair.\n\nMax deployed: 3",
 		},
 	}
 
@@ -1964,6 +1992,85 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 	story_score_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.55))
 	story_score_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	story_hud_container.add_child(story_score_label)
+	_add_sep.call(742.0)
+
+	# ── P1 Lives bar ─────────────────────────── x=750
+	_add_header.call(story_hud_container, 750.0, "P1 HP")
+	story_p1_life_segs.clear()
+	story_p1_life_hi.clear()
+	const _SEG_W := 24.0
+	const _SEG_H := 14.0
+	const _SEG_GAP := 3.0
+	const _SEG_Y := 22.0
+	var _bar_total_w := _SEG_W * PLAYER_LIVES_MAX + _SEG_GAP * (PLAYER_LIVES_MAX - 1)
+	var _lbg1 := ColorRect.new()
+	_lbg1.position = Vector2(749, 21)
+	_lbg1.size = Vector2(_bar_total_w + 2.0, _SEG_H + 2.0)
+	_lbg1.color = Color(0.04, 0.06, 0.04)
+	_lbg1.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_hud_container.add_child(_lbg1)
+	for _si in range(PLAYER_LIVES_MAX):
+		var _sx := 750.0 + _si * (_SEG_W + _SEG_GAP)
+		var _fill := ColorRect.new()
+		_fill.position = Vector2(_sx, _SEG_Y)
+		_fill.size = Vector2(_SEG_W, _SEG_H)
+		_fill.color = Color(0.10, 0.90, 0.28)
+		_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		story_hud_container.add_child(_fill)
+		story_p1_life_segs.append(_fill)
+		var _hi := ColorRect.new()
+		_hi.position = Vector2(_sx, _SEG_Y)
+		_hi.size = Vector2(_SEG_W, 3.0)
+		_hi.color = Color(0.55, 1.0, 0.65, 0.60)
+		_hi.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		story_hud_container.add_child(_hi)
+		story_p1_life_hi.append(_hi)
+	_add_sep.call(750.0 + _bar_total_w + 14.0)
+
+	# ── P2 Lives bar ─────────────────────────── x=902
+	var _p2x := 750.0 + _bar_total_w + 22.0
+	_add_header.call(story_hud_container, _p2x, "P2 HP")
+	story_p2_life_segs.clear()
+	story_p2_life_hi.clear()
+	var _lbg2 := ColorRect.new()
+	_lbg2.position = Vector2(_p2x - 1.0, 21)
+	_lbg2.size = Vector2(_bar_total_w + 2.0, _SEG_H + 2.0)
+	_lbg2.color = Color(0.07, 0.05, 0.02)
+	_lbg2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_hud_container.add_child(_lbg2)
+	for _si in range(PLAYER_LIVES_MAX):
+		var _sx := _p2x + _si * (_SEG_W + _SEG_GAP)
+		var _fill := ColorRect.new()
+		_fill.position = Vector2(_sx, _SEG_Y)
+		_fill.size = Vector2(_SEG_W, _SEG_H)
+		_fill.color = Color(0.95, 0.70, 0.05)
+		_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		story_hud_container.add_child(_fill)
+		story_p2_life_segs.append(_fill)
+		var _hi := ColorRect.new()
+		_hi.position = Vector2(_sx, _SEG_Y)
+		_hi.size = Vector2(_SEG_W, 3.0)
+		_hi.color = Color(1.0, 0.95, 0.45, 0.60)
+		_hi.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		story_hud_container.add_child(_hi)
+		story_p2_life_hi.append(_hi)
+
+	# ── Gate HP bar ──────────────────────────── x≈1058
+	var _gate_bar_x := _p2x + _bar_total_w + 22.0
+	_add_sep.call(_gate_bar_x - 12.0)
+	_add_header.call(story_hud_container, _gate_bar_x, "GATE")
+	var _gate_bars: Array = _add_bar.call(story_hud_container, _gate_bar_x, 140.0, Color(0.12, 0.04, 0.02))
+	story_gate_bar_bg   = _gate_bars[0]
+	story_gate_bar_fill = _gate_bars[1]
+	story_gate_bar_fill.color = Color(1.0, 0.30, 0.05)
+	story_gate_label = Label.new()
+	story_gate_label.text = "---"
+	story_gate_label.position = Vector2(_gate_bar_x + 146.0, 14)
+	story_gate_label.size = Vector2(130, 28)
+	story_gate_label.add_theme_font_size_override("font_size", 16)
+	story_gate_label.add_theme_color_override("font_color", Color(1.0, 0.55, 0.35))
+	story_gate_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_hud_container.add_child(story_gate_label)
 
 	# ── CO-OP LINK (RIGHT side, before crystal) — hidden until link starts ─
 	# Position: sw-490 to sw-275  (crystal label starts at sw-260)
@@ -2692,6 +2799,7 @@ func _create_player(id: int, path: String, pos: Vector2, color: Color) -> Dictio
 		"radius": 42.0 if id == 1 else 52.0,
 		"rapid": 0.0,
 		"power": 0.0,
+		"base_scale": sprite.scale,
 	}
 
 func _start_story() -> void:
@@ -2729,14 +2837,40 @@ func _start_story() -> void:
 	link_back.visible = false
 	link_fill.visible = false
 
+	var _intro_core_pos := base_sprite.position
 	for p in players:
-		p["pos"] = Vector2(screen_size.x * (0.35 if p["id"] == 1 else 0.65), screen_size.y - 280)
+		p["pos"] = _intro_core_pos
 		p["hp"] = 100
 		p["rapid"] = 0.0
 		p["power"] = 0.0
 		p["speed"] = p["base_speed"]
-		(p["sprite"] as Sprite2D).visible = true
+		var _ispr := p["sprite"] as Sprite2D
+		_ispr.visible = true
+		_ispr.scale = Vector2.ZERO
+		_ispr.position = _intro_core_pos
 		(p["shield_sprite"] as Sprite2D).visible = false
+
+	story_intro_active = true
+	story_intro_timer = STORY_INTRO_DURATION
+	player_lives = [PLAYER_LIVES_MAX, PLAYER_LIVES_MAX]
+	player_inv_timer = [0.0, 0.0]
+
+	_spawn_effect(AssetPaths.EFFECTS["twin_core_cannon"], _intro_core_pos, Vector2(260, 260), 0.5)
+
+	# ── Stage 1 gate ──────────────────────────────────────────────────
+	if gate_sprite != null and is_instance_valid(gate_sprite):
+		gate_sprite.queue_free()
+		gate_sprite = null
+	gate_hp          = GATE_HP_MAX_S1
+	gate_pos         = Vector2(screen_size.x * 0.5, 150.0)
+	gate_open        = false
+	gate_open_timer  = 0.0
+	gate_destroyed   = false
+	gate_clear_timer = 0.0
+	gate_sprite = AssetPaths.create_sprite(
+		AssetPaths.ENEMY_GATES["gate_0"], Vector2(200, 200), Color.WHITE, 5)
+	gate_sprite.position = gate_pos
+	add_child(gate_sprite)
 
 	banner_label.text = "STORY MODE"
 	if audio_manager != null:
@@ -2824,6 +2958,13 @@ func _set_background(path: String) -> void:
 	bg_sprite.position = screen_size * 0.5
 
 func _clear_game_objects() -> void:
+	if gate_sprite != null and is_instance_valid(gate_sprite):
+		gate_sprite.queue_free()
+		gate_sprite = null
+	gate_open        = false
+	gate_open_timer  = 0.0
+	gate_destroyed   = false
+	gate_clear_timer = 0.0
 	for arr in [bullets, enemy_bullets, enemies, items, effects, bombs]:
 		for obj in arr:
 			if obj.has("sprite") and is_instance_valid(obj["sprite"]):
@@ -2867,21 +3008,26 @@ func _clear_game_objects() -> void:
 		fusion_pointer_reticle.visible = false
 
 	for p in players:
+		var _pid := int(p.get("id", 1)) - 1
 		if p.has("sprite") and is_instance_valid(p["sprite"]):
-			(p["sprite"] as Sprite2D).visible = true
+			(p["sprite"] as Sprite2D).visible = (_pid < player_lives.size() and player_lives[_pid] > 0)
 		if p.has("shield_sprite") and is_instance_valid(p["shield_sprite"]):
 			(p["shield_sprite"] as Sprite2D).visible = false
 
 func _update_players(delta: float) -> void:
 	# Story fusion mode replaces normal player movement.
 	# P1: pointer + cannon. P2: movement + bomb.
+	if mode == GameMode.STORY and story_intro_active:
+		return
 	if mode == GameMode.STORY and story_fusion_active:
 		_update_story_fusion(delta)
 		return
 
 	for p in players:
-		var dir := Vector2.ZERO
 		var player_id: int = int(p["id"])
+		if mode == GameMode.STORY and player_lives[player_id - 1] <= 0:
+			continue
+		var dir := Vector2.ZERO
 		var rapid: float = float(p["rapid"])
 		var power: float = float(p.get("power", 0.0))
 
@@ -3099,9 +3245,50 @@ func _update_story(delta: float) -> void:
 		var ratio := story_fusion_timer / story_fusion_duration
 		fusion_bar_fill.size.x = 680.0 * clampf(ratio, 0.0, 1.0)
 
-	enemy_spawn_timer -= delta
-	item_spawn_timer -= delta
+	# ── Story intro: players emerge from core ──────────────────────────
+	if story_intro_active:
+		story_intro_timer = maxf(0.0, story_intro_timer - delta)
+		var _prog := 1.0 - story_intro_timer / STORY_INTRO_DURATION
+		var _scale_t := smoothstep(0.0, 0.40, _prog)
+		var _move_t := smoothstep(0.0, 1.0, _prog)
+		var _core_p := base_sprite.position
+		var _targets: Array = [
+			Vector2(screen_size.x * 0.35, screen_size.y - 280),
+			Vector2(screen_size.x * 0.65, screen_size.y - 280)
+		]
+		for _pi in range(mini(players.size(), 2)):
+			var _ip: Dictionary = players[_pi]
+			var _ispr := _ip["sprite"] as Sprite2D
+			_ispr.scale = (_ip.get("base_scale", Vector2.ONE) as Vector2) * _scale_t
+			_ip["pos"] = _core_p.lerp(_targets[_pi], _move_t)
+			_ispr.position = _ip["pos"]
+		if story_intro_timer <= 0.0:
+			story_intro_active = false
+			for _pi in range(mini(players.size(), 2)):
+				var _ip: Dictionary = players[_pi]
+				var _ispr := _ip["sprite"] as Sprite2D
+				_ispr.scale = _ip.get("base_scale", Vector2.ONE) as Vector2
+				_ip["pos"] = _targets[_pi]
+				_ispr.position = _ip["pos"]
+				_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _ip["pos"], Vector2(90, 90), 0.35)
+
+	if not story_intro_active:
+		enemy_spawn_timer -= delta
+		item_spawn_timer -= delta
 	core_shield_time = maxf(0.0, core_shield_time - delta)
+
+	if not story_fusion_active:
+		for _pi in range(player_inv_timer.size()):
+			if player_inv_timer[_pi] > 0.0:
+				player_inv_timer[_pi] = maxf(0.0, player_inv_timer[_pi] - delta)
+				if players.size() > _pi and player_lives[_pi] > 0:
+					var _ispr := players[_pi]["sprite"] as Sprite2D
+					if is_instance_valid(_ispr):
+						_ispr.visible = fmod(player_inv_timer[_pi] * 8.0, 1.0) > 0.5
+			elif players.size() > _pi and player_lives[_pi] > 0:
+				var _ispr := players[_pi]["sprite"] as Sprite2D
+				if is_instance_valid(_ispr):
+					_ispr.visible = true
 
 	# Normal core shield display.
 	# Fusion mode has its own shield display around the fusion ship.
@@ -3115,7 +3302,7 @@ func _update_story(delta: float) -> void:
 		else:
 			audio_manager.stop_shield_loop()
 
-	if not story_fusion_active:
+	if not story_fusion_active and not story_intro_active:
 		var p1_pos: Vector2 = players[0]["pos"] as Vector2
 		var p2_pos: Vector2 = players[1]["pos"] as Vector2
 		var near_players := p1_pos.distance_to(p2_pos) < 360.0
@@ -3141,13 +3328,45 @@ func _update_story(delta: float) -> void:
 	else:
 		coop_link = 0.0
 
-	if not online_game_active or _is_game_host():
-		if enemy_spawn_timer <= 0.0:
-			_spawn_enemy()
-			enemy_spawn_timer = rng.randf_range(0.65, 1.15)
-		if item_spawn_timer <= 0.0:
-			_spawn_item()
-			item_spawn_timer = rng.randf_range(5.0, 8.0)
+	# ── Stage 1 gate ──────────────────────────────────────────────────
+	if gate_sprite != null and not gate_destroyed:
+		# Open countdown starts only after intro finishes
+		if not gate_open and not story_intro_active:
+			gate_open_timer += delta
+			if gate_open_timer >= GATE_OPEN_DELAY:
+				gate_open = true
+				_spawn_effect(AssetPaths.EFFECTS["twin_core_cannon"], gate_pos, Vector2(220, 220), 0.5)
+				_spawn_effect(AssetPaths.EFFECTS["shield_bubble"], gate_pos, Vector2(260, 260), 0.4)
+				if audio_manager != null:
+					audio_manager.play_sfx("shield_activate", -5.0)
+		# Bullet vs gate collision (host only in online, always offline)
+		if gate_open and (not online_game_active or _is_game_host()):
+			for _gi in range(bullets.size() - 1, -1, -1):
+				var _gb: Dictionary = bullets[_gi]
+				if (_gb["pos"] as Vector2).distance_to(gate_pos) < 90.0 + float(_gb["radius"]):
+					gate_hp = max(0, gate_hp - int(_gb["damage"]))
+					_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _gb["pos"], Vector2(50, 50), 0.2)
+					if is_instance_valid(_gb["sprite"]):
+						(_gb["sprite"] as Sprite2D).queue_free()
+					bullets.remove_at(_gi)
+					_update_gate_sprite()
+					if gate_hp <= 0:
+						_destroy_gate()
+						break
+	elif gate_destroyed and gate_clear_timer > 0.0:
+		gate_clear_timer -= delta
+		if gate_clear_timer <= 0.0:
+			_game_over("STAGE 1 CLEAR",
+				"Gate destroyed!\nTeam Score: %d\nPress R to return to Home" % team_score)
+
+	if not story_intro_active:
+		if not online_game_active or _is_game_host():
+			if enemy_spawn_timer <= 0.0 and gate_open and not gate_destroyed:
+				_spawn_enemy()
+				enemy_spawn_timer = rng.randf_range(0.65, 1.15)
+			if item_spawn_timer <= 0.0:
+				_spawn_item()
+				item_spawn_timer = rng.randf_range(5.0, 8.0)
 	_update_enemies(delta)
 	_update_enemy_bullets(delta)
 	if base_hp <= 0:
@@ -3391,17 +3610,25 @@ func _story_twin_core_cannon() -> void:
 	_activate_story_fusion("CO-OP LINK 100%")
 
 func _spawn_enemy() -> void:
-	# Weighted pool — rare types (fortress_walker, tank, elite) appear ~6%
-	var pool: Array[String] = [
-		"scout", "scout", "scout",
-		"attacker", "attacker", "attacker",
-		"tank",
-		"elite",
-		"phantom_dart", "phantom_dart", "phantom_dart",
-		"fortress_walker",
-		"split_cell", "split_cell",
-		"bomber_drone", "bomber_drone",
-	]
+	var pool: Array[String]
+	if gate_sprite != null or gate_destroyed:
+		# Stage 1: scout / attacker / elite only, same weights
+		pool = [
+			"scout", "scout", "scout",
+			"attacker", "attacker", "attacker",
+			"elite", "elite",
+		]
+	else:
+		pool = [
+			"scout", "scout", "scout",
+			"attacker", "attacker", "attacker",
+			"tank",
+			"elite",
+			"phantom_dart", "phantom_dart", "phantom_dart",
+			"fortress_walker",
+			"split_cell", "split_cell",
+			"bomber_drone", "bomber_drone",
+		]
 	var key: String = pool[rng.randi_range(0, pool.size() - 1)]
 
 	var hp_map     := {"scout":18,  "attacker":34,  "tank":70,   "elite":110,
@@ -3418,7 +3645,11 @@ func _spawn_enemy() -> void:
 	var sz: float     = float(size_map.get(key, 90.0))
 	var radius: float = float(radius_map.get(key, 44.0))
 
-	var pos := Vector2(rng.randf_range(80.0, screen_size.x - 80.0), -80.0)
+	var pos: Vector2
+	if gate_open and not gate_destroyed:
+		pos = Vector2(gate_pos.x + rng.randf_range(-50.0, 50.0), gate_pos.y + 95.0)
+	else:
+		pos = Vector2(rng.randf_range(80.0, screen_size.x - 80.0), -80.0)
 	var sprite := AssetPaths.create_sprite(AssetPaths.ENEMIES[key], Vector2(sz, sz), Color(0.9, 0.1, 0.2), 8)
 	sprite.position = pos
 	add_child(sprite)
@@ -3477,6 +3708,21 @@ func _update_enemy_bullets(delta: float) -> void:
 				(b["sprite"] as Sprite2D).queue_free()
 			enemy_bullets.remove_at(i)
 			continue
+		# Hit players
+		var _hit_player := false
+		for _pi in range(players.size()):
+			if player_inv_timer[_pi] > 0.0 or player_lives[_pi] <= 0:
+				continue
+			var _pp: Dictionary = players[_pi]
+			if pos.distance_to(_pp["pos"]) < float(_pp["radius"]) + float(b["radius"]):
+				_on_player_hit(_pi)
+				if is_instance_valid(b["sprite"]):
+					(b["sprite"] as Sprite2D).queue_free()
+				enemy_bullets.remove_at(i)
+				_hit_player = true
+				break
+		if _hit_player:
+			continue
 		# Hit core
 		if pos.distance_to(core_pos) < 42.0 + float(b["radius"]):
 			if core_shield_time > 0.0:
@@ -3529,6 +3775,15 @@ func _update_enemies(delta: float) -> void:
 		e["pos"] = pos
 		(e["sprite"] as Sprite2D).position = pos
 
+		# Player collision (story mode)
+		if mode == GameMode.STORY:
+			for _pi in range(players.size()):
+				if player_inv_timer[_pi] > 0.0 or player_lives[_pi] <= 0:
+					continue
+				var _pp: Dictionary = players[_pi]
+				if pos.distance_to(_pp["pos"]) < float(_pp["radius"]) + float(e["radius"]) * 0.55:
+					_on_player_hit(_pi)
+
 		if int(e["hp"]) <= 0:
 			team_score += 20
 			_spawn_effect(AssetPaths.EFFECTS["explosion_small"], pos, Vector2(120, 120), 0.35)
@@ -3560,6 +3815,57 @@ func _update_enemies(delta: float) -> void:
 			if is_instance_valid(e["sprite"]):
 				(e["sprite"] as Sprite2D).queue_free()
 			enemies.remove_at(i)
+
+func _on_player_hit(pi: int) -> void:
+	if pi < 0 or pi >= player_lives.size():
+		return
+	player_lives[pi] = max(0, player_lives[pi] - 1)
+	player_inv_timer[pi] = PLAYER_INV_DURATION
+	var p: Dictionary = players[pi]
+	_spawn_effect(AssetPaths.EFFECTS["hit_spark"], p["pos"], Vector2(100, 100), 0.5)
+	if audio_manager != null:
+		audio_manager.play_sfx("hit_heavy", -2.0)
+	if player_lives[pi] <= 0:
+		if is_instance_valid(p["sprite"]):
+			(p["sprite"] as Sprite2D).visible = false
+		if player_lives[0] <= 0 and player_lives[1] <= 0:
+			base_hp = 0
+
+func _update_gate_sprite() -> void:
+	if gate_sprite == null or not is_instance_valid(gate_sprite):
+		return
+	var ratio := float(gate_hp) / float(GATE_HP_MAX_S1)
+	var key: String
+	if ratio > 0.80:
+		key = "gate_0"
+	elif ratio > 0.60:
+		key = "gate_20"
+	elif ratio > 0.40:
+		key = "gate_40"
+	elif ratio > 0.20:
+		key = "gate_60"
+	elif ratio > 0.05:
+		key = "gate_80"
+	else:
+		key = "gate_95"
+	var new_tex := AssetPaths.load_texture(AssetPaths.ENEMY_GATES[key], Color.WHITE)
+	gate_sprite.texture = new_tex
+	AssetPaths.fit_sprite(gate_sprite, Vector2(200, 200))
+
+
+func _destroy_gate() -> void:
+	gate_destroyed = true
+	gate_clear_timer = GATE_CLEAR_DELAY
+	if gate_sprite != null and is_instance_valid(gate_sprite):
+		_spawn_effect(AssetPaths.EFFECTS["explosion_large"], gate_pos, Vector2(300, 300), 1.0)
+		_spawn_effect(AssetPaths.EFFECTS["explosion_small"], gate_pos + Vector2(50, -30), Vector2(120, 120), 0.55)
+		_spawn_effect(AssetPaths.EFFECTS["explosion_small"], gate_pos + Vector2(-50, 25), Vector2(100, 100), 0.65)
+		gate_sprite.queue_free()
+		gate_sprite = null
+	if audio_manager != null:
+		audio_manager.play_sfx("explosion_large", -4.0)
+	banner_label.text = "GATE DESTROYED"
+
 
 func _spawn_item() -> void:
 	# Weighted pool: heal×3, rapid_fire×2, shield×2, power_boost×2, link_charge×1 = 10 total
@@ -3874,6 +4180,32 @@ func _update_story_hud_bar() -> void:
 
 	# ── Score ────────────────────────────────────────────────────────
 	story_score_label.text = "%d" % team_score
+
+	# ── Player lives (segmented bar) ─────────────────────────────────
+	for _si in range(story_p1_life_segs.size()):
+		var _active := _si < player_lives[0]
+		var _low := player_lives[0] <= 2
+		(story_p1_life_segs[_si] as ColorRect).color = \
+			(Color(1.0, 0.18, 0.12) if _low else Color(0.10, 0.90, 0.28)) if _active else Color(0.05, 0.12, 0.05)
+		(story_p1_life_hi[_si] as ColorRect).color.a = 0.60 if _active else 0.0
+	for _si in range(story_p2_life_segs.size()):
+		var _active := _si < player_lives[1]
+		var _low := player_lives[1] <= 2
+		(story_p2_life_segs[_si] as ColorRect).color = \
+			(Color(1.0, 0.28, 0.05) if _low else Color(0.95, 0.70, 0.05)) if _active else Color(0.14, 0.09, 0.02)
+		(story_p2_life_hi[_si] as ColorRect).color.a = 0.60 if _active else 0.0
+
+	# ── Gate HP bar ──────────────────────────────────────────────────
+	if story_gate_bar_fill != null and story_gate_label != null:
+		var _gate_ratio := clampf(float(gate_hp) / float(GATE_HP_MAX_S1), 0.0, 1.0)
+		story_gate_bar_fill.size.x = 140.0 * _gate_ratio
+		var _gr := 0.85 + 0.15 * _gate_ratio
+		var _gg := _gate_ratio * 0.55
+		story_gate_bar_fill.color = Color(_gr, _gg, 0.05)
+		if gate_sprite != null or gate_destroyed:
+			story_gate_label.text = "%d/%d" % [gate_hp, GATE_HP_MAX_S1]
+		else:
+			story_gate_label.text = "---"
 
 	# ── CO-OP LINK / FUSION TIME (right side) ────────────────────────
 	# Container visible when link is building or fusion is active
