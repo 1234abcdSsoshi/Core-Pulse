@@ -26,6 +26,7 @@ const TYPE_READY := "ready"
 const TYPE_START_GAME := "start_game"
 const TYPE_ROOM_STATE := "room_state"
 const TYPE_GAME_START := "game_start"
+const TYPE_GAME_EVENT := "game_event"
 
 
 static func hello(client_name: String) -> Dictionary:

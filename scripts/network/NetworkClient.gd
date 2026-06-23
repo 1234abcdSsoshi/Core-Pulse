@@ -26,6 +26,7 @@ signal peer_joined(player_id: int)
 signal peer_left(player_id: int)
 signal room_state_received(room_state: Dictionary)
 signal game_start_received(stage_name: String)
+signal game_event_received(ev: Dictionary)
 
 var socket: WebSocketPeer = null
 var server_url: String = "wss://twin-core-blasters-1-0.onrender.com"
@@ -179,6 +180,9 @@ func _handle_message(message: Dictionary) -> void:
 			game_start_received.emit(stage_name)
 			print("[NetworkClient] Game start: " + stage_name)
 
+		NetworkMessagesScript.TYPE_GAME_EVENT:
+			game_event_received.emit(message)
+
 		NetworkMessagesScript.TYPE_ERROR:
 			push_warning("[NetworkClient] Server error: " + str(message.get("message", "")))
 
@@ -246,6 +250,15 @@ func send_input_state(state: PlayerInputState) -> void:
 		frame_counter,
 		state.to_dictionary()
 	))
+
+
+func send_game_event(event_data: Dictionary) -> void:
+	if not is_connected_to_server() or room_id.strip_edges() == "":
+		return
+	var msg := {"type": NetworkMessagesScript.TYPE_GAME_EVENT,
+				"room_id": room_id, "player_id": local_player_id}
+	msg.merge(event_data)
+	_send_json(msg)
 
 
 func _send_json(data: Dictionary) -> void:

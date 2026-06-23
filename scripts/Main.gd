@@ -114,6 +114,7 @@ var result_message := ""
 var game_over := false
 var debug_show_hitboxes: bool = false
 var _dbg_node: Node2D
+var _entity_id_counter: int = 0
 
 var enemy_spawn_timer := 1.2
 var item_spawn_timer := 5.0
@@ -311,14 +312,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				if mode == GameMode.STORY and not game_over:
 					if shop_active:
 						_close_shop()
+						_send_game_event({"event": "ui_action", "action": "shop_close"})
 					else:
 						_open_shop()
+						_send_game_event({"event": "ui_action", "action": "shop_open"})
 					get_viewport().set_input_as_handled()
 				return
 
 			if shop_active:
 				if key_event.keycode == KEY_ESCAPE:
 					_close_shop()
+					_send_game_event({"event": "ui_action", "action": "shop_close"})
 					get_viewport().set_input_as_handled()
 				return
 
@@ -350,8 +354,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				if mode != GameMode.TITLE and not game_over:
 					if paused:
 						_resume_game()
+						_send_game_event({"event": "ui_action", "action": "resume"})
 					else:
 						_pause_game()
+						_send_game_event({"event": "ui_action", "action": "pause"})
 					get_viewport().set_input_as_handled()
 
 func _ready() -> void:
@@ -458,6 +464,8 @@ func _setup_network_client() -> void:
 		network_client.room_state_received.connect(_on_network_room_state_received)
 	if network_client.has_signal("game_start_received"):
 		network_client.game_start_received.connect(_on_network_game_start_received)
+	if network_client.has_signal("game_event_received"):
+		network_client.game_event_received.connect(_on_network_game_event)
 
 
 func set_online_input_mode(enabled: bool, local_player_id: int = 1) -> void:
@@ -679,6 +687,98 @@ func _on_network_message_received(message: Dictionary) -> void:
 	if message_type == "error":
 		network_last_message = "Server error: " + str(message.get("message", ""))
 		print("[Network] " + network_last_message)
+
+
+func _is_game_host() -> bool:
+	return not online_game_active or online_local_player_id == 1
+
+
+func _next_entity_id() -> int:
+	_entity_id_counter += 1
+	return _entity_id_counter
+
+
+func _send_game_event(event_data: Dictionary) -> void:
+	if online_game_active and network_client != null:
+		network_client.send_game_event(event_data)
+
+
+func _on_network_game_event(ev: Dictionary) -> void:
+	var event := str(ev.get("event", ""))
+	match event:
+		"enemy_spawn":
+			_recv_enemy_spawn(ev)
+		"enemy_died":
+			_recv_entity_remove(enemies, int(ev.get("id", -1)))
+		"item_spawn":
+			_recv_item_spawn(ev)
+		"ui_action":
+			_recv_ui_action(str(ev.get("action", "")))
+
+
+func _recv_entity_remove(arr: Array, id: int) -> void:
+	for i in range(arr.size() - 1, -1, -1):
+		if int(arr[i].get("id", -2)) == id:
+			if is_instance_valid(arr[i]["sprite"]):
+				(arr[i]["sprite"] as Sprite2D).queue_free()
+			arr.remove_at(i)
+			return
+
+
+func _recv_enemy_spawn(ev: Dictionary) -> void:
+	if mode != GameMode.STORY:
+		return
+	var id   := int(ev.get("id", -1))
+	var key  := str(ev.get("kind", "scout"))
+	var pos  := Vector2(float(ev.get("x", 0.0)), float(ev.get("y", -80.0)))
+	var hp   := int(ev.get("hp", 30))
+	var spd  := float(ev.get("speed", 150.0))
+	var rad  := float(ev.get("radius", 44.0))
+	var sz_map := {
+		"scout":90.0, "attacker":90.0, "tank":90.0, "elite":90.0,
+		"phantom_dart":60.0, "fortress_walker":130.0,
+		"split_cell":100.0, "split_cell_frag":55.0, "bomber_drone":110.0
+	}
+	var asset_key := "split_cell" if key == "split_cell_frag" else key
+	var sz := float(sz_map.get(key, 90.0))
+	var sprite := AssetPaths.create_sprite(AssetPaths.ENEMIES[asset_key], Vector2(sz, sz), Color(0.9, 0.1, 0.2), 8)
+	sprite.position = pos
+	add_child(sprite)
+	var data := {"id": id, "pos": pos, "hp": hp, "speed": spd, "sprite": sprite, "radius": rad, "kind": key}
+	if key == "bomber_drone":
+		data["shoot_timer"] = float(ev.get("shoot_timer", 2.0))
+		data["strafe_dir"]  = float(ev.get("strafe_dir", 1.0))
+		data["strafe_timer"] = float(ev.get("strafe_timer", 2.0))
+	enemies.append(data)
+
+
+func _recv_item_spawn(ev: Dictionary) -> void:
+	if mode != GameMode.STORY:
+		return
+	var id  := int(ev.get("id", -1))
+	var key := str(ev.get("key", "heal"))
+	var pos := Vector2(float(ev.get("x", 0.0)), float(ev.get("y", 0.0)))
+	var sprite := AssetPaths.create_sprite(AssetPaths.ITEMS[key], Vector2(76, 76), Color(0.2, 1.0, 0.7), 12)
+	sprite.position = pos
+	add_child(sprite)
+	items.append({"id": id, "key": key, "pos": pos, "sprite": sprite, "radius": 42.0})
+
+
+func _recv_ui_action(action: String) -> void:
+	match action:
+		"shop_open":
+			if not shop_active:
+				_open_shop()
+		"shop_close":
+			if shop_active:
+				_close_shop()
+		"pause":
+			if not paused:
+				_pause_game()
+		"resume":
+			if paused:
+				_resume_game()
+
 
 
 func _on_network_remote_input_received(player_id: int, input_data: Dictionary) -> void:
@@ -3041,12 +3141,13 @@ func _update_story(delta: float) -> void:
 	else:
 		coop_link = 0.0
 
-	if enemy_spawn_timer <= 0.0:
-		_spawn_enemy()
-		enemy_spawn_timer = rng.randf_range(0.65, 1.15)
-	if item_spawn_timer <= 0.0:
-		_spawn_item()
-		item_spawn_timer = rng.randf_range(5.0, 8.0)
+	if not online_game_active or _is_game_host():
+		if enemy_spawn_timer <= 0.0:
+			_spawn_enemy()
+			enemy_spawn_timer = rng.randf_range(0.65, 1.15)
+		if item_spawn_timer <= 0.0:
+			_spawn_item()
+			item_spawn_timer = rng.randf_range(5.0, 8.0)
 	_update_enemies(delta)
 	_update_enemy_bullets(delta)
 	if base_hp <= 0:
@@ -3322,12 +3423,22 @@ func _spawn_enemy() -> void:
 	sprite.position = pos
 	add_child(sprite)
 
-	var data := {"pos": pos, "hp": hp, "speed": speed, "sprite": sprite, "radius": radius, "kind": key}
+	var id := _next_entity_id()
+	var data := {"id": id, "pos": pos, "hp": hp, "speed": speed, "sprite": sprite, "radius": radius, "kind": key}
 	if key == "bomber_drone":
 		data["shoot_timer"] = rng.randf_range(1.0, 2.5)
 		data["strafe_dir"]  = float(rng.randi_range(0, 1) * 2 - 1)
 		data["strafe_timer"] = rng.randf_range(1.5, 3.0)
 	enemies.append(data)
+
+	if online_game_active:
+		var ev := {"event": "enemy_spawn", "id": id, "kind": key,
+				   "x": pos.x, "y": pos.y, "hp": hp, "speed": speed, "radius": radius}
+		if key == "bomber_drone":
+			ev["shoot_timer"] = float(data["shoot_timer"])
+			ev["strafe_dir"]  = float(data["strafe_dir"])
+			ev["strafe_timer"] = float(data["strafe_timer"])
+		_send_game_event(ev)
 
 
 func _spawn_split_cell_frag(from_pos: Vector2) -> void:
@@ -3336,8 +3447,12 @@ func _spawn_split_cell_frag(from_pos: Vector2) -> void:
 	var sprite := AssetPaths.create_sprite(AssetPaths.ENEMIES["split_cell"], Vector2(55, 55), Color(0.2, 0.9, 0.2), 8)
 	sprite.position = pos
 	add_child(sprite)
-	enemies.append({"pos": pos, "hp": 20, "speed": 160.0, "sprite": sprite,
+	var id := _next_entity_id()
+	enemies.append({"id": id, "pos": pos, "hp": 20, "speed": 160.0, "sprite": sprite,
 					"radius": 28.0, "kind": "split_cell_frag"})
+	if online_game_active:
+		_send_game_event({"event": "enemy_spawn", "id": id, "kind": "split_cell_frag",
+						  "x": pos.x, "y": pos.y, "hp": 20, "speed": 160.0, "radius": 28.0})
 
 
 func _fire_bomber_shot(from: Vector2, target: Vector2) -> void:
@@ -3419,6 +3534,8 @@ func _update_enemies(delta: float) -> void:
 			_spawn_effect(AssetPaths.EFFECTS["explosion_small"], pos, Vector2(120, 120), 0.35)
 			if audio_manager != null:
 				audio_manager.play_sfx("explosion_small", -7.0)
+			if online_game_active:
+				_send_game_event({"event": "enemy_died", "id": int(e.get("id", -1))})
 			if is_instance_valid(e["sprite"]):
 				(e["sprite"] as Sprite2D).queue_free()
 			enemies.remove_at(i)
@@ -3438,6 +3555,8 @@ func _update_enemies(delta: float) -> void:
 				base_hp = max(0, base_hp - 8)
 				if audio_manager != null:
 					audio_manager.play_sfx("core_damage", -7.0)
+			if online_game_active:
+				_send_game_event({"event": "enemy_died", "id": int(e.get("id", -1))})
 			if is_instance_valid(e["sprite"]):
 				(e["sprite"] as Sprite2D).queue_free()
 			enemies.remove_at(i)
@@ -3456,7 +3575,10 @@ func _spawn_item() -> void:
 	var sprite := AssetPaths.create_sprite(AssetPaths.ITEMS[key], Vector2(76, 76), Color(0.2, 1.0, 0.7), 12)
 	sprite.position = pos
 	add_child(sprite)
-	items.append({"key": key, "pos": pos, "sprite": sprite, "radius": 42.0})
+	var id := _next_entity_id()
+	items.append({"id": id, "key": key, "pos": pos, "sprite": sprite, "radius": 42.0})
+	if online_game_active:
+		_send_game_event({"event": "item_spawn", "id": id, "key": key, "x": pos.x, "y": pos.y})
 
 func _update_items(_delta: float) -> void:
 	for i in range(items.size() - 1, -1, -1):

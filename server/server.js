@@ -37,6 +37,7 @@ const MESSAGE = {
   PEER_LEFT: "peer_left",
   PING: "ping",
   PONG: "pong",
+  GAME_EVENT: "game_event",
 };
 
 const rooms = new Map();
@@ -225,6 +226,14 @@ function handleStartGame(ws, msg) {
   console.log(`[room ${room.id}] game start: ${stage}`);
 }
 
+function handleGameEvent(ws, msg) {
+  const roomId = String(msg.room_id || ws.roomId || "").trim().toUpperCase();
+  if (!rooms.has(roomId)) return;
+  const room = rooms.get(roomId);
+  const relayMsg = { ...msg, room_id: roomId, player_id: ws.playerId };
+  broadcastToRoom(room, relayMsg, ws);
+}
+
 function handleInput(ws, msg) {
   const roomId = String(msg.room_id || ws.roomId || "").trim().toUpperCase();
   if (!rooms.has(roomId)) return;
@@ -255,6 +264,7 @@ function handleMessage(ws, raw) {
     case MESSAGE.READY: handleReady(ws, msg); break;
     case MESSAGE.START_GAME: handleStartGame(ws, msg); break;
     case MESSAGE.INPUT: handleInput(ws, msg); break;
+    case MESSAGE.GAME_EVENT: handleGameEvent(ws, msg); break;
     case MESSAGE.PING: send(ws, { type: MESSAGE.PONG, server_time: Date.now() }); break;
     default: sendError(ws, `Unknown message type: ${msg.type}`); break;
   }
