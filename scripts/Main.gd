@@ -125,6 +125,31 @@ const STORY_INTRO_DURATION := 1.8
 var story_intro_active := false
 var story_intro_timer := 0.0
 
+# Solo / co-op mode selection
+var solo_mode: bool = false
+var player_ship_map: Array = [1, 2]   # [P1 ship_id, P2 ship_id] (1=Azure Wing, 2=Solar Fang)
+var player_name_map: Array = ["PLAYER 1", "PLAYER 2"]
+
+# Story mode select screen
+var story_mode_select_layer: CanvasLayer
+
+# Character select screen
+var char_select_layer: CanvasLayer
+var char_select_mode: String = ""
+var _cs_configs: Array = [
+	{"name": "PLAYER 1", "ship_id": 1, "ready": false, "joined": true},
+	{"name": "PLAYER 2", "ship_id": 2, "ready": false, "joined": false},
+]
+var _cs_panels: Array = []
+var _cs_ship_btns: Array = []
+var _cs_name_edits: Array = []
+var _cs_status_lbls: Array = []
+var _cs_ready_btns: Array = []
+var _cs_start_btn: Button
+var _cs_room_area: Control
+var _cs_room_lbl: Label
+var _cs_join_edit: LineEdit
+
 var enemy_spawn_timer := 1.2
 var item_spawn_timer := 5.0
 var shoot_cd_p1 := 0.0
@@ -305,6 +330,7 @@ var story_p1_life_segs: Array = []
 var story_p1_life_hi: Array = []
 var story_p2_life_segs: Array = []
 var story_p2_life_hi: Array = []
+var story_p2_hud_header: Label
 var story_gate_bar_bg: ColorRect
 var story_gate_bar_fill: ColorRect
 var story_gate_label: Label
@@ -742,6 +768,10 @@ func _on_network_game_event(ev: Dictionary) -> void:
 			_recv_item_spawn(ev)
 		"ui_action":
 			_recv_ui_action(str(ev.get("action", "")))
+		"char_select":
+			_recv_char_select(ev)
+		"cs_start":
+			_recv_cs_start(ev)
 
 
 func _recv_entity_remove(arr: Array, id: int) -> void:
@@ -1061,6 +1091,8 @@ func _setup_ui() -> void:
 	_setup_instruction_screen()
 	_setup_online_lobby_ui()
 	_setup_online_status_hud()
+	_setup_story_mode_select()
+	_setup_char_select()
 
 	game_over_layer = CanvasLayer.new()
 	game_over_layer.layer = 30
@@ -2029,7 +2061,7 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 
 	# ── P2 Lives bar ─────────────────────────── x=902
 	var _p2x := 750.0 + _bar_total_w + 22.0
-	_add_header.call(story_hud_container, _p2x, "P2 HP")
+	story_p2_hud_header = _add_header.call(story_hud_container, _p2x, "P2 HP")
 	story_p2_life_segs.clear()
 	story_p2_life_hi.clear()
 	var _lbg2 := ColorRect.new()
@@ -2611,7 +2643,7 @@ func _on_online_lobby_start_game_requested() -> void:
 
 
 func _on_story_button_pressed() -> void:
-	_show_stage_instruction("story")
+	_show_story_mode_select()
 
 
 func _on_astral_button_pressed() -> void:
@@ -2709,7 +2741,7 @@ func _handle_title_input() -> void:
 		return
 
 	if Input.is_key_pressed(KEY_1) or Input.is_key_pressed(KEY_ENTER) or Input.is_key_pressed(KEY_SPACE):
-		_show_stage_instruction("story")
+		_show_story_mode_select()
 	elif Input.is_key_pressed(KEY_2):
 		_show_stage_instruction("astral")
 	elif Input.is_key_pressed(KEY_3):
@@ -2754,19 +2786,22 @@ func _on_stage_finished(result: Dictionary) -> void:
 
 
 func _get_player_spec(player_id: int) -> Dictionary:
-	# Returns a safe player spec.
-	# If a wrong ID is passed, P1's spec is used as a fallback.
-	if player_specs.has(player_id):
-		return player_specs[player_id]
+	var ship_id: int = int(player_ship_map[player_id - 1]) if player_id - 1 < player_ship_map.size() else player_id
+	if player_specs.has(ship_id):
+		return player_specs[ship_id]
 	return player_specs[1]
 
 
 func _create_players() -> void:
 	players.clear()
-	var p1: Dictionary = _create_player(1, AssetPaths.PLAYERS["p1"], Vector2(screen_size.x * 0.35, screen_size.y - 160), Color(0.2, 0.85, 1.0))
-	var p2: Dictionary = _create_player(2, AssetPaths.PLAYERS["p2"], Vector2(screen_size.x * 0.65, screen_size.y - 160), Color(1.0, 0.66, 0.18))
-	players.append(p1)
-	players.append(p2)
+	const _SHIP_PATHS: Array[String] = ["p1", "p2"]
+	const _SHIP_COLORS: Array[Color] = [Color(0.2, 0.85, 1.0), Color(1.0, 0.66, 0.18)]
+	const _INIT_POS_X: Array[float] = [0.35, 0.65]
+	for _pi in range(2):
+		var _sid: int = int(player_ship_map[_pi] if _pi < player_ship_map.size() else _pi + 1) - 1
+		var _path: String = AssetPaths.PLAYERS[_SHIP_PATHS[clampi(_sid, 0, 1)]]
+		var _col: Color = _SHIP_COLORS[clampi(_sid, 0, 1)]
+		players.append(_create_player(_pi + 1, _path, Vector2(screen_size.x * _INIT_POS_X[_pi], screen_size.y - 160), _col))
 
 func _create_player(id: int, path: String, pos: Vector2, color: Color) -> Dictionary:
 	var spec: Dictionary = _get_player_spec(id)
@@ -2837,15 +2872,18 @@ func _start_story() -> void:
 	link_back.visible = false
 	link_fill.visible = false
 
+	_rebuild_player_ships()
 	var _intro_core_pos := base_sprite.position
 	for p in players:
+		var _pid := int(p["id"])
+		var _is_p2 := _pid == 2
 		p["pos"] = _intro_core_pos
 		p["hp"] = 100
 		p["rapid"] = 0.0
 		p["power"] = 0.0
 		p["speed"] = p["base_speed"]
 		var _ispr := p["sprite"] as Sprite2D
-		_ispr.visible = true
+		_ispr.visible = not (solo_mode and _is_p2)
 		_ispr.scale = Vector2.ZERO
 		_ispr.position = _intro_core_pos
 		(p["shield_sprite"] as Sprite2D).visible = false
@@ -2854,6 +2892,14 @@ func _start_story() -> void:
 	story_intro_timer = STORY_INTRO_DURATION
 	player_lives = [PLAYER_LIVES_MAX, PLAYER_LIVES_MAX]
 	player_inv_timer = [0.0, 0.0]
+	if solo_mode:
+		player_lives[1] = 0
+	if story_p2_hud_header != null:
+		story_p2_hud_header.visible = not solo_mode
+	for _si in story_p2_life_segs:
+		(_si as CanvasItem).visible = not solo_mode
+	for _hi in story_p2_life_hi:
+		(_hi as CanvasItem).visible = not solo_mode
 
 	_spawn_effect(AssetPaths.EFFECTS["twin_core_cannon"], _intro_core_pos, Vector2(260, 260), 0.5)
 
@@ -3256,7 +3302,8 @@ func _update_story(delta: float) -> void:
 			Vector2(screen_size.x * 0.35, screen_size.y - 280),
 			Vector2(screen_size.x * 0.65, screen_size.y - 280)
 		]
-		for _pi in range(mini(players.size(), 2)):
+		var _anim_count := 1 if solo_mode else mini(players.size(), 2)
+		for _pi in range(_anim_count):
 			var _ip: Dictionary = players[_pi]
 			var _ispr := _ip["sprite"] as Sprite2D
 			_ispr.scale = (_ip.get("base_scale", Vector2.ONE) as Vector2) * _scale_t
@@ -3264,7 +3311,7 @@ func _update_story(delta: float) -> void:
 			_ispr.position = _ip["pos"]
 		if story_intro_timer <= 0.0:
 			story_intro_active = false
-			for _pi in range(mini(players.size(), 2)):
+			for _pi in range(_anim_count):
 				var _ip: Dictionary = players[_pi]
 				var _ispr := _ip["sprite"] as Sprite2D
 				_ispr.scale = _ip.get("base_scale", Vector2.ONE) as Vector2
@@ -3302,7 +3349,7 @@ func _update_story(delta: float) -> void:
 		else:
 			audio_manager.stop_shield_loop()
 
-	if not story_fusion_active and not story_intro_active:
+	if not story_fusion_active and not story_intro_active and not solo_mode:
 		var p1_pos: Vector2 = players[0]["pos"] as Vector2
 		var p2_pos: Vector2 = players[1]["pos"] as Vector2
 		var near_players := p1_pos.distance_to(p2_pos) < 360.0
@@ -4366,3 +4413,537 @@ func _setup_debug_overlay() -> void:
 	_dbg_node = _DebugDraw.new()
 	(_dbg_node as _DebugDraw).main_ref = self
 	canvas.add_child(_dbg_node)
+
+
+# ─── Player ship rebuild ──────────────────────────────────────────────────────
+
+func _rebuild_player_ships() -> void:
+	const _SHIP_PATHS: Array[String] = ["p1", "p2"]
+	const _SHIP_COLORS: Array[Color] = [Color(0.2, 0.85, 1.0), Color(1.0, 0.66, 0.18)]
+	for p in players:
+		var _pid: int = int(p["id"]) - 1
+		var _sid: int = clampi(int(player_ship_map[_pid] if _pid < player_ship_map.size() else _pid + 1) - 1, 0, 1)
+		var _path: String = AssetPaths.PLAYERS[_SHIP_PATHS[_sid]]
+		var _col: Color = _SHIP_COLORS[_sid]
+		(p["sprite"] as Sprite2D).texture = AssetPaths.load_texture(_path, _col)
+		var _spec := _get_player_spec(_pid + 1)
+		p["base_speed"]     = float(_spec["speed"])
+		p["speed"]          = float(_spec["speed"])
+		p["shoot_interval"] = float(_spec["shoot_interval"])
+		p["rapid_interval"] = float(_spec["rapid_interval"])
+		p["damage"]         = int(_spec["damage"])
+		p["bullet_size"]    = float(_spec["bullet_size"])
+		p["power_mode"]     = str(_spec["power_mode"])
+		if _pid < player_name_map.size():
+			p["name"] = player_name_map[_pid]
+
+
+# ─── Story Mode Select ────────────────────────────────────────────────────────
+
+func _setup_story_mode_select() -> void:
+	story_mode_select_layer = CanvasLayer.new()
+	story_mode_select_layer.layer = 22
+	story_mode_select_layer.visible = false
+	add_child(story_mode_select_layer)
+
+	var bg := ColorRect.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.00, 0.02, 0.07, 0.95)
+	story_mode_select_layer.add_child(bg)
+
+	var title := Label.new()
+	title.text = "STORY MODE"
+	title.position = Vector2(0, 160)
+	title.size = Vector2(screen_size.x, 88)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 72)
+	title.add_theme_color_override("font_color", Color(0.18, 1.0, 0.88))
+	story_mode_select_layer.add_child(title)
+
+	var sub := Label.new()
+	sub.text = "SELECT PLAY STYLE"
+	sub.position = Vector2(0, 268)
+	sub.size = Vector2(screen_size.x, 36)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_font_size_override("font_size", 26)
+	sub.add_theme_color_override("font_color", Color(0.50, 0.72, 0.88))
+	story_mode_select_layer.add_child(sub)
+
+	var bw := 520.0
+	var bh := 100.0
+	var cx := screen_size.x * 0.5
+	var by := 360.0
+
+	var s_btn := _create_premium_button("SINGLE PLAYER", Vector2(cx - bw - 40.0, by), Vector2(bw, bh))
+	s_btn.pressed.connect(_on_story_single_selected)
+	story_mode_select_layer.add_child(s_btn)
+
+	var d_btn := _create_premium_button("CO-OP DOUBLE", Vector2(cx + 40.0, by), Vector2(bw, bh))
+	d_btn.pressed.connect(_on_story_double_selected)
+	story_mode_select_layer.add_child(d_btn)
+
+	var _desc_texts := [
+		"Solo defense — select your ship and fight alone",
+		"Online co-op — create or join a room\n(Expandable to 4 players)",
+	]
+	var _desc_xs := [cx - bw - 40.0, cx + 40.0]
+	for _di in range(2):
+		var lbl := Label.new()
+		lbl.text = str(_desc_texts[_di])
+		lbl.position = Vector2(float(_desc_xs[_di]), by + bh + 12.0)
+		lbl.size = Vector2(bw, 60)
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.add_theme_font_size_override("font_size", 20)
+		lbl.add_theme_color_override("font_color", Color(0.50, 0.72, 0.88))
+		story_mode_select_layer.add_child(lbl)
+
+	var back_btn := Button.new()
+	back_btn.text = "BACK"
+	back_btn.position = Vector2(cx - 130.0, by + bh + 110.0)
+	back_btn.size = Vector2(260, 56)
+	back_btn.add_theme_font_size_override("font_size", 22)
+	back_btn.pressed.connect(func():
+		story_mode_select_layer.visible = false
+		title_layer.visible = true
+	)
+	story_mode_select_layer.add_child(back_btn)
+
+
+func _show_story_mode_select() -> void:
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_select", -8.0)
+	title_layer.visible = false
+	story_mode_select_layer.visible = true
+
+
+func _on_story_single_selected() -> void:
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_confirm", -6.0)
+	story_mode_select_layer.visible = false
+	char_select_mode = "single"
+	_cs_configs[0]["joined"] = true
+	_cs_configs[0]["ready"] = false
+	_cs_configs[1]["joined"] = false
+	_update_char_select()
+	char_select_layer.visible = true
+
+
+func _on_story_double_selected() -> void:
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_confirm", -6.0)
+	story_mode_select_layer.visible = false
+	char_select_mode = "double"
+	_cs_configs[0]["joined"] = true
+	_cs_configs[0]["ready"] = false
+	_cs_configs[1]["joined"] = false
+	_cs_configs[1]["ready"] = false
+	_update_char_select()
+	char_select_layer.visible = true
+
+
+# ─── Character Select ─────────────────────────────────────────────────────────
+
+const _CS_SHIP_NAMES := ["Azure Wing", "Solar Fang"]
+const _CS_SHIP_COLORS := [Color(0.20, 0.85, 1.00), Color(1.00, 0.66, 0.18)]
+
+func _setup_char_select() -> void:
+	char_select_layer = CanvasLayer.new()
+	char_select_layer.layer = 23
+	char_select_layer.visible = false
+	add_child(char_select_layer)
+
+	var bg := ColorRect.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.00, 0.02, 0.07, 0.96)
+	char_select_layer.add_child(bg)
+
+	var title := Label.new()
+	title.text = "CHARACTER SELECT"
+	title.position = Vector2(0, 30)
+	title.size = Vector2(screen_size.x, 64)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 52)
+	title.add_theme_color_override("font_color", Color(0.18, 1.0, 0.88))
+	char_select_layer.add_child(title)
+
+	# Room area — shown for DOUBLE mode only
+	_cs_room_area = Control.new()
+	_cs_room_area.position = Vector2(0, 106)
+	_cs_room_area.size = Vector2(screen_size.x, 50)
+	char_select_layer.add_child(_cs_room_area)
+
+	_cs_room_lbl = Label.new()
+	_cs_room_lbl.text = "ROOM: ----"
+	_cs_room_lbl.position = Vector2(screen_size.x * 0.5 - 440, 10)
+	_cs_room_lbl.size = Vector2(200, 32)
+	_cs_room_lbl.add_theme_font_size_override("font_size", 24)
+	_cs_room_lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+	_cs_room_area.add_child(_cs_room_lbl)
+
+	var create_btn := Button.new()
+	create_btn.text = "CREATE ROOM"
+	create_btn.position = Vector2(screen_size.x * 0.5 - 230, 8)
+	create_btn.size = Vector2(220, 36)
+	create_btn.add_theme_font_size_override("font_size", 18)
+	create_btn.pressed.connect(_on_cs_create_room)
+	_cs_room_area.add_child(create_btn)
+
+	_cs_join_edit = LineEdit.new()
+	_cs_join_edit.placeholder_text = "ROOM CODE"
+	_cs_join_edit.position = Vector2(screen_size.x * 0.5 + 0, 8)
+	_cs_join_edit.size = Vector2(140, 36)
+	_cs_join_edit.max_length = 4
+	_cs_join_edit.add_theme_font_size_override("font_size", 18)
+	_cs_room_area.add_child(_cs_join_edit)
+
+	var join_btn := Button.new()
+	join_btn.text = "JOIN"
+	join_btn.position = Vector2(screen_size.x * 0.5 + 150, 8)
+	join_btn.size = Vector2(90, 36)
+	join_btn.add_theme_font_size_override("font_size", 18)
+	join_btn.pressed.connect(_on_cs_join_room)
+	_cs_room_area.add_child(join_btn)
+
+	# Player panels
+	_cs_panels.clear(); _cs_ship_btns.clear()
+	_cs_name_edits.clear(); _cs_status_lbls.clear(); _cs_ready_btns.clear()
+	const PANEL_W := 500.0
+	const PANEL_H := 540.0
+	const PANEL_GAP := 36.0
+	var panel_y := 174.0
+	for _si in range(2):
+		var _total_w := PANEL_W * 2 + PANEL_GAP
+		var _px := screen_size.x * 0.5 - _total_w * 0.5 + _si * (PANEL_W + PANEL_GAP)
+		var _panel := _cs_make_panel(_si, _px, panel_y, PANEL_W, PANEL_H)
+		char_select_layer.add_child(_panel)
+		_cs_panels.append(_panel)
+
+	# START and BACK buttons
+	var btn_y := panel_y + PANEL_H + 22.0
+	_cs_start_btn = _create_premium_button("START GAME", Vector2(screen_size.x * 0.5 - 220.0, btn_y), Vector2(440.0, 70.0))
+	_cs_start_btn.pressed.connect(_on_cs_start_game)
+	char_select_layer.add_child(_cs_start_btn)
+
+	var back_btn := Button.new()
+	back_btn.text = "BACK"
+	back_btn.position = Vector2(screen_size.x * 0.5 + 240.0, btn_y + 10.0)
+	back_btn.size = Vector2(160, 50)
+	back_btn.add_theme_font_size_override("font_size", 20)
+	back_btn.pressed.connect(_on_cs_back)
+	char_select_layer.add_child(back_btn)
+
+	# Connect network signals
+	if network_client != null:
+		if not network_client.peer_joined.is_connected(_on_cs_peer_joined):
+			network_client.peer_joined.connect(_on_cs_peer_joined)
+		if not network_client.room_changed.is_connected(_on_cs_room_changed):
+			network_client.room_changed.connect(_on_cs_room_changed)
+
+
+func _cs_make_panel(slot: int, px: float, py: float, pw: float, ph: float) -> Control:
+	const SLOT_COLORS: Array[Color] = [Color(0.20, 0.85, 1.00), Color(1.00, 0.66, 0.18)]
+	var slot_col: Color = SLOT_COLORS[clampi(slot, 0, SLOT_COLORS.size() - 1)]
+
+	var panel := Control.new()
+	panel.position = Vector2(px, py)
+	panel.size = Vector2(pw, ph)
+
+	var border := ColorRect.new()
+	border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	border.color = Color(slot_col.r, slot_col.g, slot_col.b, 0.22)
+	panel.add_child(border)
+
+	var inner := ColorRect.new()
+	inner.position = Vector2(2, 2)
+	inner.size = Vector2(pw - 4, ph - 4)
+	inner.color = Color(0.04, 0.06, 0.12)
+	panel.add_child(inner)
+
+	var header := Label.new()
+	header.text = "P%d" % (slot + 1)
+	header.position = Vector2(0, 14)
+	header.size = Vector2(pw, 40)
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.add_theme_font_size_override("font_size", 32)
+	header.add_theme_color_override("font_color", slot_col)
+	panel.add_child(header)
+
+	var name_lbl := Label.new()
+	name_lbl.text = "NAME"
+	name_lbl.position = Vector2(24, 68)
+	name_lbl.size = Vector2(80, 28)
+	name_lbl.add_theme_font_size_override("font_size", 18)
+	name_lbl.add_theme_color_override("font_color", Color(0.55, 0.72, 0.88))
+	panel.add_child(name_lbl)
+
+	var name_edit := LineEdit.new()
+	name_edit.text = str(_cs_configs[slot].get("name", "PLAYER %d" % (slot + 1)))
+	name_edit.position = Vector2(110, 66)
+	name_edit.size = Vector2(pw - 134, 34)
+	name_edit.max_length = 16
+	name_edit.add_theme_font_size_override("font_size", 20)
+	name_edit.text_changed.connect(func(t: String): _cs_on_name_changed(slot, t))
+	panel.add_child(name_edit)
+	_cs_name_edits.append(name_edit)
+
+	var ship_label := Label.new()
+	ship_label.text = "SHIP"
+	ship_label.position = Vector2(24, 118)
+	ship_label.size = Vector2(80, 28)
+	ship_label.add_theme_font_size_override("font_size", 18)
+	ship_label.add_theme_color_override("font_color", Color(0.55, 0.72, 0.88))
+	panel.add_child(ship_label)
+
+	var slot_ship_btns: Array = []
+	for shi in range(2):
+		var sbtn := Button.new()
+		sbtn.text = _CS_SHIP_NAMES[shi]
+		sbtn.position = Vector2(24, 148 + shi * 70)
+		sbtn.size = Vector2(pw - 48, 58)
+		sbtn.add_theme_font_size_override("font_size", 22)
+		sbtn.pressed.connect(_on_cs_ship_selected.bind(slot, shi + 1))
+		panel.add_child(sbtn)
+		slot_ship_btns.append(sbtn)
+	_cs_ship_btns.append(slot_ship_btns)
+
+	var status_lbl := Label.new()
+	status_lbl.text = "Waiting..."
+	status_lbl.position = Vector2(0, ph - 120)
+	status_lbl.size = Vector2(pw, 34)
+	status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status_lbl.add_theme_font_size_override("font_size", 22)
+	status_lbl.add_theme_color_override("font_color", Color(0.60, 0.70, 0.80))
+	panel.add_child(status_lbl)
+	_cs_status_lbls.append(status_lbl)
+
+	var ready_btn := Button.new()
+	ready_btn.text = "READY"
+	ready_btn.position = Vector2(24, ph - 78)
+	ready_btn.size = Vector2(pw - 48, 58)
+	ready_btn.add_theme_font_size_override("font_size", 24)
+	ready_btn.pressed.connect(_on_cs_ready_toggled.bind(slot))
+	panel.add_child(ready_btn)
+	_cs_ready_btns.append(ready_btn)
+
+	return panel
+
+
+func _cs_on_name_changed(slot: int, text: String) -> void:
+	_cs_configs[slot]["name"] = text
+	_cs_broadcast()
+
+
+func _update_char_select() -> void:
+	if char_select_layer == null:
+		return
+	var is_double := char_select_mode == "double"
+	var is_single := char_select_mode == "single"
+	_cs_room_area.visible = is_double
+	if is_double and network_client != null:
+		var rc := network_client.room_id if network_client.room_id != "" else "----"
+		_cs_room_lbl.text = "ROOM: %s" % rc
+
+	var shown := 1 if is_single else 2
+	const PANEL_W := 500.0
+	const PANEL_GAP := 36.0
+	var total_w := PANEL_W * shown + PANEL_GAP * (shown - 1)
+	var start_x := screen_size.x * 0.5 - total_w * 0.5
+	for si in range(_cs_panels.size()):
+		var panel := _cs_panels[si] as Control
+		panel.visible = si < shown
+		if si < shown:
+			panel.position.x = start_x + si * (PANEL_W + PANEL_GAP)
+
+	var local_slot := 0
+	if is_double and online_game_active:
+		local_slot = max(0, online_local_player_id - 1)
+
+	for si in range(_cs_panels.size()):
+		if si >= shown:
+			continue
+		var cfg: Dictionary = _cs_configs[si]
+		var is_local := (si == local_slot)
+
+		(_cs_name_edits[si] as LineEdit).editable = is_local
+		(_cs_name_edits[si] as LineEdit).modulate.a = 1.0 if is_local else 0.6
+
+		var sel_ship := int(cfg.get("ship_id", 1))
+		for shi in range(2):
+			var sbtn := _cs_ship_btns[si][shi] as Button
+			sbtn.disabled = not is_local
+			if shi + 1 == sel_ship:
+				sbtn.add_theme_color_override("font_color", _CS_SHIP_COLORS[shi])
+				sbtn.modulate = Color(1.0, 1.0, 1.0, 1.0)
+			else:
+				sbtn.remove_theme_color_override("font_color")
+				sbtn.modulate = Color(0.45, 0.45, 0.45, 0.9)
+
+		var status_lbl := _cs_status_lbls[si] as Label
+		var ready_btn := _cs_ready_btns[si] as Button
+		var joined: bool = bool(cfg.get("joined", false))
+		var ready: bool = bool(cfg.get("ready", false))
+
+		if is_single:
+			status_lbl.visible = false
+			ready_btn.visible = false
+		elif not joined:
+			status_lbl.text = "Waiting for player..."
+			status_lbl.add_theme_color_override("font_color", Color(0.45, 0.55, 0.65))
+			ready_btn.visible = false
+			status_lbl.visible = true
+		elif ready:
+			status_lbl.text = "READY!"
+			status_lbl.add_theme_color_override("font_color", Color(0.30, 1.00, 0.45))
+			ready_btn.text = "CANCEL"
+			ready_btn.visible = is_local
+			status_lbl.visible = true
+		else:
+			status_lbl.text = "Press READY when set"
+			status_lbl.add_theme_color_override("font_color", Color(0.60, 0.70, 0.80))
+			ready_btn.text = "READY"
+			ready_btn.visible = is_local
+			status_lbl.visible = true
+
+	var can_start := false
+	if is_single:
+		can_start = true
+	elif is_double:
+		can_start = _cs_is_host() and _cs_all_joined_ready()
+	_cs_start_btn.visible = can_start
+
+
+func _cs_is_host() -> bool:
+	return not online_game_active or online_local_player_id == 1
+
+
+func _cs_all_joined_ready() -> bool:
+	for si in range(_cs_configs.size()):
+		var cfg: Dictionary = _cs_configs[si]
+		if bool(cfg.get("joined", false)) and not bool(cfg.get("ready", false)):
+			return false
+	return true
+
+
+func _on_cs_ship_selected(slot: int, ship_id: int) -> void:
+	_cs_configs[slot]["ship_id"] = ship_id
+	_update_char_select()
+	_cs_broadcast()
+
+
+func _on_cs_ready_toggled(slot: int) -> void:
+	_cs_configs[slot]["ready"] = not bool(_cs_configs[slot].get("ready", false))
+	_update_char_select()
+	_cs_broadcast()
+
+
+func _cs_broadcast() -> void:
+	if not online_game_active or network_client == null:
+		return
+	var local_slot: int = maxi(0, online_local_player_id - 1)
+	if local_slot >= _cs_configs.size():
+		return
+	var cfg: Dictionary = _cs_configs[local_slot]
+	_send_game_event({
+		"event": "char_select",
+		"slot": local_slot,
+		"name": str(cfg.get("name", "")),
+		"ship_id": int(cfg.get("ship_id", local_slot + 1)),
+		"ready": bool(cfg.get("ready", false)),
+	})
+
+
+func _recv_char_select(ev: Dictionary) -> void:
+	var slot := int(ev.get("slot", 1))
+	if slot < 0 or slot >= _cs_configs.size():
+		return
+	_cs_configs[slot]["name"] = str(ev.get("name", "PLAYER %d" % (slot + 1)))
+	_cs_configs[slot]["ship_id"] = int(ev.get("ship_id", slot + 1))
+	_cs_configs[slot]["ready"] = bool(ev.get("ready", false))
+	_cs_configs[slot]["joined"] = true
+	if slot < _cs_name_edits.size():
+		(_cs_name_edits[slot] as LineEdit).text = str(_cs_configs[slot]["name"])
+	_update_char_select()
+
+
+func _recv_cs_start(ev: Dictionary) -> void:
+	# P2 receives this when host starts the game
+	for si in range(mini(ev.get("slot_count", 2), _cs_configs.size())):
+		var key := "p%d" % si
+		var slot_data: Dictionary = ev.get(key, {}) as Dictionary
+		if slot_data.size() > 0:
+			_cs_configs[si]["ship_id"] = int(slot_data.get("ship_id", si + 1))
+			_cs_configs[si]["name"] = str(slot_data.get("name", "PLAYER %d" % (si + 1)))
+	_apply_cs_configs_and_start()
+
+
+func _on_cs_create_room() -> void:
+	if network_client == null:
+		return
+	if not network_client.is_connected_to_server():
+		network_client.connect_to_server()
+		await get_tree().create_timer(1.0).timeout
+	network_client.create_room("story")
+	online_game_active = true
+	online_local_player_id = 1
+	_update_char_select()
+
+
+func _on_cs_join_room() -> void:
+	var code := (_cs_join_edit as LineEdit).text.strip_edges().to_upper()
+	if code.length() < 1:
+		return
+	if network_client == null:
+		return
+	if not network_client.is_connected_to_server():
+		network_client.connect_to_server()
+		await get_tree().create_timer(1.0).timeout
+	network_client.join_room(code)
+	online_game_active = true
+	online_local_player_id = 2
+	_cs_configs[1]["joined"] = true
+	_update_char_select()
+
+
+func _on_cs_peer_joined(_player_id: int) -> void:
+	if char_select_layer != null and char_select_layer.visible:
+		_cs_configs[1]["joined"] = true
+		_update_char_select()
+
+
+func _on_cs_room_changed(room_id: String) -> void:
+	if char_select_layer != null and char_select_layer.visible:
+		_cs_room_lbl.text = "ROOM: %s" % (room_id if room_id != "" else "----")
+
+
+func _on_cs_back() -> void:
+	char_select_layer.visible = false
+	if online_game_active and char_select_mode == "double":
+		online_game_active = false
+	story_mode_select_layer.visible = true
+
+
+func _on_cs_start_game() -> void:
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_confirm", -6.0)
+	if char_select_mode == "double" and online_game_active:
+		# Broadcast final config to P2, then both start
+		var payload := {"event": "cs_start", "slot_count": 2}
+		for si in range(_cs_configs.size()):
+			payload["p%d" % si] = {
+				"ship_id": int(_cs_configs[si].get("ship_id", si + 1)),
+				"name": str(_cs_configs[si].get("name", "PLAYER %d" % (si + 1))),
+			}
+		_send_game_event(payload)
+	_apply_cs_configs_and_start()
+
+
+func _apply_cs_configs_and_start() -> void:
+	for si in range(mini(_cs_configs.size(), player_ship_map.size())):
+		player_ship_map[si] = int(_cs_configs[si].get("ship_id", si + 1))
+	for si in range(mini(_cs_configs.size(), player_name_map.size())):
+		player_name_map[si] = str(_cs_configs[si].get("name", "PLAYER %d" % (si + 1)))
+	solo_mode = (char_select_mode == "single")
+	if solo_mode:
+		online_game_active = false
+	char_select_layer.visible = false
+	_load_stage(StoryStageScript)
