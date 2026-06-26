@@ -142,6 +142,7 @@ var _cs_configs: Array = [
 ]
 var _cs_panels: Array = []
 var _cs_ship_btns: Array = []
+var _cs_ship_imgs: Array = []
 var _cs_name_edits: Array = []
 var _cs_status_lbls: Array = []
 var _cs_ready_btns: Array = []
@@ -863,12 +864,11 @@ func _on_network_remote_input_received(player_id: int, input_data: Dictionary) -
 
 
 func _on_network_player_assigned(player_id: int) -> void:
-	# The server assigns this browser as P1 or P2.
-	# Once assigned, switch to online input mode:
-	# local player = arrows + Space, remote player = WebSocket input.
 	print("[Network] This client is P%d" % player_id)
 	network_last_message = "This client is P%d" % player_id
 	set_online_input_mode(true, player_id)
+	if char_select_layer != null and char_select_layer.visible:
+		return
 	if online_lobby != null:
 		online_lobby.set_local_player(player_id)
 		online_lobby.set_status_message("This client is P%d" % player_id)
@@ -878,6 +878,10 @@ func _on_network_room_changed(new_room_id: String) -> void:
 	network_join_room_code = new_room_id
 	network_last_message = "Room: " + new_room_id
 	print("[Network] Room: " + new_room_id)
+	if char_select_layer != null and char_select_layer.visible:
+		if _cs_room_lbl != null:
+			_cs_room_lbl.text = "ROOM: " + new_room_id
+		return
 	if online_lobby != null:
 		online_lobby.set_room_id(new_room_id)
 		online_lobby.set_status_message("Room: " + new_room_id)
@@ -900,6 +904,9 @@ func _on_network_peer_left(player_id: int) -> void:
 
 
 func _on_network_room_state_received(room_state: Dictionary) -> void:
+	if char_select_layer != null and char_select_layer.visible:
+		_cs_on_room_state(room_state)
+		return
 	# Step 9-12:
 	# 繧ｵ繝ｼ繝舌・縺九ｉ螻翫＞縺滄Κ螻九・迥ｶ諷九ｒ繝ｭ繝薙・UI縺ｸ蜿肴丐縺励∪縺吶・
 	# 萓具ｼ啀1/P2縺ｮ蜷榊燕縲ヽeady迥ｶ諷九ヾtart蜿ｯ閭ｽ迥ｶ諷九↑縺ｩ縲・
@@ -4605,7 +4612,7 @@ func _setup_char_select() -> void:
 	_cs_room_area.add_child(join_btn)
 
 	# Player panels
-	_cs_panels.clear(); _cs_ship_btns.clear()
+	_cs_panels.clear(); _cs_ship_btns.clear(); _cs_ship_imgs.clear()
 	_cs_name_edits.clear(); _cs_status_lbls.clear(); _cs_ready_btns.clear()
 	const PANEL_W := 500.0
 	const PANEL_H := 540.0
@@ -4694,17 +4701,42 @@ func _cs_make_panel(slot: int, px: float, py: float, pw: float, ph: float) -> Co
 	ship_label.add_theme_color_override("font_color", Color(0.55, 0.72, 0.88))
 	panel.add_child(ship_label)
 
+	const _CS_PREVIEW_PATHS: Array[String] = [
+		"res://assets/players/player_azure_wing.png",
+		"res://assets/players/player_solar_fang.png",
+	]
 	var slot_ship_btns: Array = []
 	for shi in range(2):
+		var img_rect := TextureRect.new()
+		img_rect.position = Vector2(24, 150 + shi * 72)
+		img_rect.size = Vector2(54, 54)
+		img_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		img_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		if ResourceLoader.exists(_CS_PREVIEW_PATHS[shi]):
+			img_rect.texture = load(_CS_PREVIEW_PATHS[shi])
+		panel.add_child(img_rect)
+
 		var sbtn := Button.new()
 		sbtn.text = _CS_SHIP_NAMES[shi]
-		sbtn.position = Vector2(24, 148 + shi * 70)
-		sbtn.size = Vector2(pw - 48, 58)
+		sbtn.position = Vector2(88, 148 + shi * 72)
+		sbtn.size = Vector2(pw - 112, 58)
 		sbtn.add_theme_font_size_override("font_size", 22)
 		sbtn.pressed.connect(_on_cs_ship_selected.bind(slot, shi + 1))
 		panel.add_child(sbtn)
 		slot_ship_btns.append(sbtn)
 	_cs_ship_btns.append(slot_ship_btns)
+
+	# Selected ship preview (large, centered)
+	var preview_img := TextureRect.new()
+	preview_img.position = Vector2(pw * 0.5 - 64, 300)
+	preview_img.size = Vector2(128, 128)
+	preview_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	preview_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	var init_idx := clampi(int(_cs_configs[slot].get("ship_id", slot + 1)) - 1, 0, 1)
+	if ResourceLoader.exists(_CS_PREVIEW_PATHS[init_idx]):
+		preview_img.texture = load(_CS_PREVIEW_PATHS[init_idx])
+	panel.add_child(preview_img)
+	_cs_ship_imgs.append(preview_img)
 
 	var status_lbl := Label.new()
 	status_lbl.text = "Waiting..."
@@ -4777,6 +4809,16 @@ func _update_char_select() -> void:
 			else:
 				sbtn.remove_theme_color_override("font_color")
 				sbtn.modulate = Color(0.45, 0.45, 0.45, 0.9)
+
+		if si < _cs_ship_imgs.size():
+			const _UPD_PATHS: Array[String] = [
+				"res://assets/players/player_azure_wing.png",
+				"res://assets/players/player_solar_fang.png",
+			]
+			var pidx := clampi(sel_ship - 1, 0, 1)
+			var prev := _cs_ship_imgs[si] as TextureRect
+			if prev.texture == null or ResourceLoader.exists(_UPD_PATHS[pidx]):
+				prev.texture = load(_UPD_PATHS[pidx])
 
 		var status_lbl := _cs_status_lbls[si] as Label
 		var ready_btn := _cs_ready_btns[si] as Button
@@ -4879,6 +4921,8 @@ func _recv_cs_start(ev: Dictionary) -> void:
 func _on_cs_create_room() -> void:
 	if network_client == null:
 		return
+	if online_lobby != null:
+		online_lobby.close_lobby()
 	if not network_client.is_connected_to_server():
 		network_client.connect_to_server()
 		await get_tree().create_timer(1.0).timeout
@@ -4894,6 +4938,8 @@ func _on_cs_join_room() -> void:
 		return
 	if network_client == null:
 		return
+	if online_lobby != null:
+		online_lobby.close_lobby()
 	if not network_client.is_connected_to_server():
 		network_client.connect_to_server()
 		await get_tree().create_timer(1.0).timeout
@@ -4913,6 +4959,22 @@ func _on_cs_peer_joined(_player_id: int) -> void:
 func _on_cs_room_changed(room_id: String) -> void:
 	if char_select_layer != null and char_select_layer.visible:
 		_cs_room_lbl.text = "ROOM: %s" % (room_id if room_id != "" else "----")
+
+
+func _cs_on_room_state(room_state: Dictionary) -> void:
+	if room_state.has("room_id"):
+		var rid := str(room_state.get("room_id", ""))
+		if rid != "" and _cs_room_lbl != null:
+			_cs_room_lbl.text = "ROOM: " + rid
+	var players_data: Dictionary = room_state.get("players", {}) as Dictionary
+	var p2_data: Dictionary = players_data.get("p2", {}) as Dictionary
+	if bool(p2_data.get("occupied", false)):
+		_cs_configs[1]["joined"] = true
+		var p2name := str(p2_data.get("name", "PLAYER 2"))
+		if p2name != "" and _cs_name_edits.size() > 1:
+			_cs_configs[1]["name"] = p2name
+			(_cs_name_edits[1] as LineEdit).text = p2name
+	_update_char_select()
 
 
 func _on_cs_back() -> void:
