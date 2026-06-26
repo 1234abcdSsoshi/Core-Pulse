@@ -3411,12 +3411,6 @@ func _update_story(delta: float) -> void:
 					if gate_hp <= 0:
 						_destroy_gate()
 						break
-	elif gate_destroyed and gate_clear_timer > 0.0:
-		gate_clear_timer -= delta
-		if gate_clear_timer <= 0.0:
-			_game_over("STAGE 1 CLEAR",
-				"Gate destroyed!\nTeam Score: %d\nPress R to return to Home" % team_score)
-
 	if not story_intro_active:
 		if not online_game_active or _is_game_host():
 			if enemy_spawn_timer <= 0.0 and gate_open and not gate_destroyed:
@@ -3913,13 +3907,14 @@ func _update_gate_sprite() -> void:
 
 func _destroy_gate() -> void:
 	gate_destroyed = true
-	gate_clear_timer = GATE_CLEAR_DELAY
 	if gate_sprite != null and is_instance_valid(gate_sprite):
 		_spawn_effect(AssetPaths.EFFECTS["explosion_large"], gate_pos, Vector2(300, 300), 1.0)
 		_spawn_effect(AssetPaths.EFFECTS["explosion_small"], gate_pos + Vector2(50, -30), Vector2(120, 120), 0.55)
 		_spawn_effect(AssetPaths.EFFECTS["explosion_small"], gate_pos + Vector2(-50, 25), Vector2(100, 100), 0.65)
 		gate_sprite.queue_free()
 		gate_sprite = null
+	_game_over("STAGE 1 CLEAR",
+		"Gate destroyed!\nTeam Score: %d\nPress R to return to Home" % team_score)
 	if audio_manager != null:
 		audio_manager.play_sfx("explosion_large", -4.0)
 	banner_label.text = "GATE DESTROYED"
