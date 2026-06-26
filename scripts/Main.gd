@@ -2724,6 +2724,9 @@ func _on_result_retry_pressed() -> void:
 
 func _show_title() -> void:
 	mode = GameMode.TITLE
+	solo_mode = false
+	if not online_game_active:
+		set_online_input_mode(false, 1)
 	# Step 13: 繧ｿ繧､繝医Ν縺ｫ謌ｻ繧九→縺阪・縲√が繝ｳ繝ｩ繧､繝ｳ繧ｲ繝ｼ繝荳ｭHUD繧帝撼陦ｨ遉ｺ縺ｫ縺励∪縺吶・
 	_show_online_status_hud(false)
 	title_layer.visible = true
@@ -3126,7 +3129,8 @@ func _shoot(player_id: int) -> void:
 	if mode == GameMode.ASTRAL_COURT:
 		direction = Vector2.RIGHT if player_id == 1 else Vector2.LEFT
 
-	var path: String = AssetPaths.PROJECTILES["azure"] if player_id == 1 else AssetPaths.PROJECTILES["solar"]
+	var _shoot_sid := int(player_ship_map[player_id - 1]) if player_id - 1 < player_ship_map.size() else player_id
+	var path: String = AssetPaths.PROJECTILES["azure"] if _shoot_sid == 1 else AssetPaths.PROJECTILES["solar"]
 	var origin: Vector2 = p["pos"]
 	var damage: int = int(p["damage"])
 	var shot_speed: float = float(p["shot_speed"])
@@ -3154,7 +3158,7 @@ func _shoot(player_id: int) -> void:
 	_fire_weapon_extra(player_id, origin, direction * shot_speed)
 
 	if audio_manager != null:
-		audio_manager.play_sfx("shot_azure" if player_id == 1 else "shot_solar", -8.0)
+		audio_manager.play_sfx("shot_azure" if _shoot_sid == 1 else "shot_solar", -8.0)
 
 func _create_bullet(pos: Vector2, dir: Vector2, owner_id: int, damage: int, path: String, speed: float, size: float, piercing: bool = false) -> Dictionary:
 	var sprite := AssetPaths.create_sprite(path, Vector2(size, size), Color.WHITE, 20)
@@ -3923,13 +3927,23 @@ func _destroy_gate() -> void:
 
 func _spawn_item() -> void:
 	# Weighted pool: heal×3, rapid_fire×2, shield×2, power_boost×2, link_charge×1 = 10 total
-	var pool: Array[String] = [
-		"heal", "heal", "heal",
-		"rapid_fire", "rapid_fire",
-		"shield", "shield",
-		"power_boost", "power_boost",
-		"link_charge",
-	]
+	# In solo mode, link_charge is omitted (no partner to fuse with)
+	var pool: Array[String]
+	if solo_mode:
+		pool = [
+			"heal", "heal", "heal",
+			"rapid_fire", "rapid_fire",
+			"shield", "shield",
+			"power_boost", "power_boost",
+		]
+	else:
+		pool = [
+			"heal", "heal", "heal",
+			"rapid_fire", "rapid_fire",
+			"shield", "shield",
+			"power_boost", "power_boost",
+			"link_charge",
+		]
 	var key: String = pool[rng.randi_range(0, pool.size() - 1)]
 	var pos := Vector2(rng.randf_range(120.0, screen_size.x - 120.0), rng.randf_range(160.0, screen_size.y - 180.0))
 	var sprite := AssetPaths.create_sprite(AssetPaths.ITEMS[key], Vector2(76, 76), Color(0.2, 1.0, 0.7), 12)
@@ -5007,5 +5021,6 @@ func _apply_cs_configs_and_start() -> void:
 	solo_mode = (char_select_mode == "single")
 	if solo_mode:
 		online_game_active = false
+		set_online_input_mode(true, 1)
 	char_select_layer.visible = false
 	_load_stage(StoryStageScript)
