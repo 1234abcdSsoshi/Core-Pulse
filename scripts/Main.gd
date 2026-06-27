@@ -113,6 +113,9 @@ var result_title := ""
 var result_message := ""
 var game_over := false
 var debug_show_hitboxes: bool = false
+# Carry-over data between stages (crystals, lives, active item timers).
+# Populated in _on_result_next_stage_pressed(), consumed in _start_story().
+var _stage_carry: Dictionary = {}
 var _dbg_node: Node2D
 var _entity_id_counter: int = 0
 
@@ -2794,6 +2797,22 @@ func _on_result_next_stage_pressed() -> void:
 	game_over_layer.visible = false
 	if result_next_stage_button != null:
 		result_next_stage_button.visible = false
+
+	# Save state that should persist into the next stage.
+	var _rapid_list: Array[float] = []
+	var _power_list: Array[float] = []
+	for _cp in players:
+		_rapid_list.append(float(_cp.get("rapid", 0.0)))
+		_power_list.append(float(_cp.get("power", 0.0)))
+	_stage_carry = {
+		"crystals":    crystals,
+		"lives":       player_lives.duplicate(),
+		"rapid":       _rapid_list,
+		"power":       _power_list,
+		"shield_time": core_shield_time,
+		"shield_max":  core_shield_max,
+	}
+
 	story_stage_number += 1
 	_load_stage(StoryStageScript)
 
@@ -2996,6 +3015,29 @@ func _start_story() -> void:
 		(_si as CanvasItem).visible = not solo_mode
 	for _hi in story_p2_life_hi:
 		(_hi as CanvasItem).visible = not solo_mode
+
+	# ── Restore carry-over from previous stage ────────────────────────
+	if not _stage_carry.is_empty():
+		# Crystals (reset by _clear_game_objects; restore here)
+		crystals = int(_stage_carry.get("crystals", 0))
+		_update_hud_crystal_label()
+		# Lives — ensure at least 1 for P1; P2 keeps 0 in solo mode
+		var _cl: Array = _stage_carry.get("lives", [PLAYER_LIVES_MAX, PLAYER_LIVES_MAX])
+		player_lives[0] = clampi(int(_cl[0]) if _cl.size() > 0 else PLAYER_LIVES_MAX, 1, PLAYER_LIVES_MAX)
+		if not solo_mode and _cl.size() > 1:
+			player_lives[1] = clampi(int(_cl[1]), 1, PLAYER_LIVES_MAX)
+		# Per-player active item timers
+		var _carry_rapid: Array = _stage_carry.get("rapid", [])
+		var _carry_power: Array = _stage_carry.get("power", [])
+		for _ci in range(players.size()):
+			players[_ci]["rapid"] = float(_carry_rapid[_ci]) if _ci < _carry_rapid.size() else 0.0
+			players[_ci]["power"] = float(_carry_power[_ci]) if _ci < _carry_power.size() else 0.0
+		# Core shield (carry remaining time, capped to 10s)
+		var _ct: float = float(_stage_carry.get("shield_time", 0.0))
+		if _ct > 0.0:
+			core_shield_time = minf(_ct, 10.0)
+			core_shield_max  = float(_stage_carry.get("shield_max", core_shield_time))
+		_stage_carry = {}
 
 	_spawn_effect(AssetPaths.EFFECTS["twin_core_cannon"], _intro_core_pos, Vector2(260, 260), 0.5)
 
