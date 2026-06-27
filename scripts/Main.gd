@@ -321,6 +321,15 @@ var gate2_open := false
 var gate2_open_timer := 0.0
 var gate2_destroyed := false
 
+# Stage 3 third gate
+const GATE_HP_MAX_S3 := 600
+var gate3_sprite: Sprite2D = null
+var gate3_hp := 0
+var gate3_pos := Vector2.ZERO
+var gate3_open := false
+var gate3_open_timer := 0.0
+var gate3_destroyed := false
+
 # Story HUD bar (top compact bar)
 var story_hud_container: Control      # master container — hide to remove all
 var story_hud_bar: ColorRect
@@ -350,6 +359,9 @@ var story_gate_header_label: Label
 var story_gate2_bar_bg: ColorRect
 var story_gate2_bar_fill: ColorRect
 var story_gate2_label: Label
+var story_gate3_bar_bg: ColorRect
+var story_gate3_bar_fill: ColorRect
+var story_gate3_label: Label
 var core_shield_max := 0.0            # tracks max shield for bar ratio
 
 # Step 13: 繧ｪ繝ｳ繝ｩ繧､繝ｳ繝励Ξ繧､荳ｭ縺縺題｡ｨ遉ｺ縺吶ｋ蟆上＆縺ｪ繧ｹ繝・・繧ｿ繧ｹHUD縺ｧ縺吶
@@ -2146,6 +2158,26 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 	story_gate2_bar_fill.visible = false
 	story_gate2_label.visible   = false
 
+	# ── Gate 3 HP bar (Stage 3 only) ───────── x≈1638
+	var _gate3_bar_x := _gate2_bar_x + 290.0
+	_add_sep.call(_gate3_bar_x - 12.0)
+	_add_header.call(story_hud_container, _gate3_bar_x, "GATE 3")
+	var _gate3_bars: Array = _add_bar.call(story_hud_container, _gate3_bar_x, 140.0, Color(0.12, 0.04, 0.02))
+	story_gate3_bar_bg   = _gate3_bars[0]
+	story_gate3_bar_fill = _gate3_bars[1]
+	story_gate3_bar_fill.color = Color(1.0, 0.30, 0.05)
+	story_gate3_label = Label.new()
+	story_gate3_label.text = "---"
+	story_gate3_label.position = Vector2(_gate3_bar_x + 146.0, 14)
+	story_gate3_label.size = Vector2(130, 28)
+	story_gate3_label.add_theme_font_size_override("font_size", 16)
+	story_gate3_label.add_theme_color_override("font_color", Color(1.0, 0.55, 0.35))
+	story_gate3_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_hud_container.add_child(story_gate3_label)
+	story_gate3_bar_bg.visible  = false
+	story_gate3_bar_fill.visible = false
+	story_gate3_label.visible   = false
+
 	# ── CO-OP LINK (RIGHT side, before crystal) — hidden until link starts ─
 	# Position: sw-490 to sw-275  (crystal label starts at sw-260)
 	var lx: float = sw - 490.0
@@ -2762,7 +2794,7 @@ func _on_result_next_stage_pressed() -> void:
 	game_over_layer.visible = false
 	if result_next_stage_button != null:
 		result_next_stage_button.visible = false
-	story_stage_number = 2
+	story_stage_number += 1
 	_load_stage(StoryStageScript)
 
 
@@ -2968,62 +3000,68 @@ func _start_story() -> void:
 	_spawn_effect(AssetPaths.EFFECTS["twin_core_cannon"], _intro_core_pos, Vector2(260, 260), 0.5)
 
 	# ── Gate setup (stage-dependent) ─────────────────────────────────
-	if gate_sprite != null and is_instance_valid(gate_sprite):
-		gate_sprite.queue_free()
-		gate_sprite = null
-	if gate2_sprite != null and is_instance_valid(gate2_sprite):
-		gate2_sprite.queue_free()
-		gate2_sprite = null
+	for _gs in [gate_sprite, gate2_sprite, gate3_sprite]:
+		if _gs != null and is_instance_valid(_gs):
+			(_gs as Sprite2D).queue_free()
+	gate_sprite = null; gate2_sprite = null; gate3_sprite = null
 
-	if story_stage_number == 2:
-		# Stage 2: two gates side by side
-		gate_hp          = GATE_HP_MAX_S2
-		gate_pos         = Vector2(screen_size.x * 0.30, 160.0)
-		gate_open        = false
-		gate_open_timer  = 0.0
-		gate_destroyed   = false
-		gate_clear_timer = 0.0
-		gate_sprite = AssetPaths.create_sprite(
-			AssetPaths.ENEMY_GATES["gate_0"], Vector2(190, 190), Color.WHITE, 5)
-		gate_sprite.position = gate_pos
-		add_child(gate_sprite)
+	if story_stage_number == 3:
+		# Stage 3: three gates at 20%, 50%, 80%
+		const _SZ3 := Vector2(175, 175)
+		gate_hp = GATE_HP_MAX_S3; gate_pos = Vector2(screen_size.x * 0.20, 165.0)
+		gate_open = false; gate_open_timer = 0.0; gate_destroyed = false; gate_clear_timer = 0.0
+		gate_sprite = AssetPaths.create_sprite(AssetPaths.ENEMY_GATES["gate_0"], _SZ3, Color.WHITE, 5)
+		gate_sprite.position = gate_pos; add_child(gate_sprite)
 
-		gate2_hp         = GATE_HP_MAX_S2
-		gate2_pos        = Vector2(screen_size.x * 0.70, 160.0)
-		gate2_open       = false
-		gate2_open_timer = 0.0
-		gate2_destroyed  = false
-		gate2_sprite = AssetPaths.create_sprite(
-			AssetPaths.ENEMY_GATES["gate_0"], Vector2(190, 190), Color.WHITE, 5)
-		gate2_sprite.position = gate2_pos
-		add_child(gate2_sprite)
+		gate2_hp = GATE_HP_MAX_S3; gate2_pos = Vector2(screen_size.x * 0.50, 165.0)
+		gate2_open = false; gate2_open_timer = 0.0; gate2_destroyed = false
+		gate2_sprite = AssetPaths.create_sprite(AssetPaths.ENEMY_GATES["gate_0"], _SZ3, Color.WHITE, 5)
+		gate2_sprite.position = gate2_pos; add_child(gate2_sprite)
+
+		gate3_hp = GATE_HP_MAX_S3; gate3_pos = Vector2(screen_size.x * 0.80, 165.0)
+		gate3_open = false; gate3_open_timer = 0.0; gate3_destroyed = false
+		gate3_sprite = AssetPaths.create_sprite(AssetPaths.ENEMY_GATES["gate_0"], _SZ3, Color.WHITE, 5)
+		gate3_sprite.position = gate3_pos; add_child(gate3_sprite)
 
 		if story_gate_header_label != null:
 			story_gate_header_label.text = "GATE 1"
-		if story_gate2_bar_bg != null:
-			story_gate2_bar_bg.visible  = true
-			story_gate2_bar_fill.visible = true
-			story_gate2_label.visible   = true
+		for _b in [story_gate2_bar_bg, story_gate2_bar_fill, story_gate2_label,
+				   story_gate3_bar_bg, story_gate3_bar_fill, story_gate3_label]:
+			if _b != null: (_b as CanvasItem).visible = true
+
+	elif story_stage_number == 2:
+		# Stage 2: two gates at 30%, 70%
+		gate_hp = GATE_HP_MAX_S2; gate_pos = Vector2(screen_size.x * 0.30, 160.0)
+		gate_open = false; gate_open_timer = 0.0; gate_destroyed = false; gate_clear_timer = 0.0
+		gate_sprite = AssetPaths.create_sprite(AssetPaths.ENEMY_GATES["gate_0"], Vector2(190, 190), Color.WHITE, 5)
+		gate_sprite.position = gate_pos; add_child(gate_sprite)
+
+		gate2_hp = GATE_HP_MAX_S2; gate2_pos = Vector2(screen_size.x * 0.70, 160.0)
+		gate2_open = false; gate2_open_timer = 0.0; gate2_destroyed = false
+		gate2_sprite = AssetPaths.create_sprite(AssetPaths.ENEMY_GATES["gate_0"], Vector2(190, 190), Color.WHITE, 5)
+		gate2_sprite.position = gate2_pos; add_child(gate2_sprite)
+
+		gate3_destroyed = true
+		if story_gate_header_label != null:
+			story_gate_header_label.text = "GATE 1"
+		for _b in [story_gate2_bar_bg, story_gate2_bar_fill, story_gate2_label]:
+			if _b != null: (_b as CanvasItem).visible = true
+		for _b in [story_gate3_bar_bg, story_gate3_bar_fill, story_gate3_label]:
+			if _b != null: (_b as CanvasItem).visible = false
+
 	else:
 		# Stage 1: single center gate
-		gate_hp          = GATE_HP_MAX_S1
-		gate_pos         = Vector2(screen_size.x * 0.5, 150.0)
-		gate_open        = false
-		gate_open_timer  = 0.0
-		gate_destroyed   = false
-		gate_clear_timer = 0.0
-		gate_sprite = AssetPaths.create_sprite(
-			AssetPaths.ENEMY_GATES["gate_0"], Vector2(200, 200), Color.WHITE, 5)
-		gate_sprite.position = gate_pos
-		add_child(gate_sprite)
+		gate_hp = GATE_HP_MAX_S1; gate_pos = Vector2(screen_size.x * 0.5, 150.0)
+		gate_open = false; gate_open_timer = 0.0; gate_destroyed = false; gate_clear_timer = 0.0
+		gate_sprite = AssetPaths.create_sprite(AssetPaths.ENEMY_GATES["gate_0"], Vector2(200, 200), Color.WHITE, 5)
+		gate_sprite.position = gate_pos; add_child(gate_sprite)
 
-		gate2_destroyed  = true
+		gate2_destroyed = true; gate3_destroyed = true
 		if story_gate_header_label != null:
 			story_gate_header_label.text = "GATE"
-		if story_gate2_bar_bg != null:
-			story_gate2_bar_bg.visible  = false
-			story_gate2_bar_fill.visible = false
-			story_gate2_label.visible   = false
+		for _b in [story_gate2_bar_bg, story_gate2_bar_fill, story_gate2_label,
+				   story_gate3_bar_bg, story_gate3_bar_fill, story_gate3_label]:
+			if _b != null: (_b as CanvasItem).visible = false
 
 	banner_label.text = "STAGE %d" % story_stage_number
 	if audio_manager != null:
@@ -3124,6 +3162,12 @@ func _clear_game_objects() -> void:
 	gate2_open        = false
 	gate2_open_timer  = 0.0
 	gate2_destroyed   = false
+	if gate3_sprite != null and is_instance_valid(gate3_sprite):
+		gate3_sprite.queue_free()
+		gate3_sprite = null
+	gate3_open        = false
+	gate3_open_timer  = 0.0
+	gate3_destroyed   = false
 	for arr in [bullets, enemy_bullets, enemies, items, effects, bombs]:
 		for obj in arr:
 			if obj.has("sprite") and is_instance_valid(obj["sprite"]):
@@ -3513,8 +3557,8 @@ func _update_story(delta: float) -> void:
 						_destroy_gate()
 						break
 
-	# ── Gate 2 (Stage 2 only) ─────────────────────────────────────────
-	if story_stage_number == 2 and gate2_sprite != null and not gate2_destroyed:
+	# ── Gate 2 (Stage 2+) ────────────────────────────────────────────
+	if story_stage_number >= 2 and gate2_sprite != null and not gate2_destroyed:
 		if not gate2_open and not story_intro_active:
 			gate2_open_timer += delta
 			if gate2_open_timer >= GATE_OPEN_DELAY:
@@ -3537,10 +3581,34 @@ func _update_story(delta: float) -> void:
 						_destroy_gate2()
 						break
 
+	# ── Gate 3 (Stage 3 only) ────────────────────────────────────────
+	if story_stage_number >= 3 and gate3_sprite != null and not gate3_destroyed:
+		if not gate3_open and not story_intro_active:
+			gate3_open_timer += delta
+			if gate3_open_timer >= GATE_OPEN_DELAY:
+				gate3_open = true
+				_spawn_effect(AssetPaths.EFFECTS["twin_core_cannon"], gate3_pos, Vector2(220, 220), 0.5)
+				_spawn_effect(AssetPaths.EFFECTS["shield_bubble"], gate3_pos, Vector2(260, 260), 0.4)
+				if audio_manager != null:
+					audio_manager.play_sfx("shield_activate", -5.0)
+		if gate3_open and (not online_game_active or _is_game_host()):
+			for _g3i in range(bullets.size() - 1, -1, -1):
+				var _g3b: Dictionary = bullets[_g3i]
+				if (_g3b["pos"] as Vector2).distance_to(gate3_pos) < 90.0 + float(_g3b["radius"]):
+					gate3_hp = max(0, gate3_hp - int(_g3b["damage"]))
+					_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _g3b["pos"], Vector2(50, 50), 0.2)
+					if is_instance_valid(_g3b["sprite"]):
+						(_g3b["sprite"] as Sprite2D).queue_free()
+					bullets.remove_at(_g3i)
+					_update_gate3_sprite()
+					if gate3_hp <= 0:
+						_destroy_gate3()
+						break
+
 	if not story_intro_active:
 		if not online_game_active or _is_game_host():
-			var any_gate_open := gate_open or (story_stage_number == 2 and gate2_open)
-			var all_gates_gone := gate_destroyed and gate2_destroyed
+			var any_gate_open := gate_open or (story_stage_number >= 2 and gate2_open) or (story_stage_number >= 3 and gate3_open)
+			var all_gates_gone := gate_destroyed and gate2_destroyed and gate3_destroyed
 			if enemy_spawn_timer <= 0.0 and any_gate_open and not all_gates_gone:
 				_spawn_enemy()
 				enemy_spawn_timer = rng.randf_range(0.65, 1.15)
@@ -3791,7 +3859,19 @@ func _story_twin_core_cannon() -> void:
 
 func _spawn_enemy() -> void:
 	var pool: Array[String]
-	if story_stage_number == 2:
+	if story_stage_number >= 3:
+		# Stage 3: hardest mix — all enemy types
+		pool = [
+			"scout", "scout",
+			"attacker", "attacker",
+			"tank", "tank",
+			"elite", "elite",
+			"phantom_dart", "phantom_dart",
+			"fortress_walker",
+			"split_cell",
+			"bomber_drone", "bomber_drone",
+		]
+	elif story_stage_number == 2:
 		# Stage 2: stronger variety including tanks and elites
 		pool = [
 			"scout", "scout",
@@ -3835,13 +3915,15 @@ func _spawn_enemy() -> void:
 	var radius: float = float(radius_map.get(key, 44.0))
 
 	var pos: Vector2
-	if story_stage_number == 2:
-		# Stage 2: pick spawn gate randomly from whichever gates are still open
+	if story_stage_number >= 2:
+		# Stage 2+: pick spawn gate randomly from whichever gates are still open
 		var open_gates: Array[Vector2] = []
 		if gate_open and not gate_destroyed:
 			open_gates.append(gate_pos)
 		if gate2_open and not gate2_destroyed:
 			open_gates.append(gate2_pos)
+		if story_stage_number >= 3 and gate3_open and not gate3_destroyed:
+			open_gates.append(gate3_pos)
 		if open_gates.size() > 0:
 			var chosen_gate: Vector2 = open_gates[rng.randi_range(0, open_gates.size() - 1)]
 			pos = Vector2(chosen_gate.x + rng.randf_range(-45.0, 45.0), chosen_gate.y + 95.0)
@@ -4044,55 +4126,84 @@ func _gate_damage_key(ratio: float) -> String:
 func _update_gate_sprite() -> void:
 	if gate_sprite == null or not is_instance_valid(gate_sprite):
 		return
-	var max_hp := GATE_HP_MAX_S2 if story_stage_number == 2 else GATE_HP_MAX_S1
+	var max_hp: int
+	var sz: Vector2
+	if story_stage_number >= 3:
+		max_hp = GATE_HP_MAX_S3; sz = Vector2(175, 175)
+	elif story_stage_number == 2:
+		max_hp = GATE_HP_MAX_S2; sz = Vector2(190, 190)
+	else:
+		max_hp = GATE_HP_MAX_S1; sz = Vector2(200, 200)
 	var key := _gate_damage_key(float(gate_hp) / float(max_hp))
 	gate_sprite.texture = AssetPaths.load_texture(AssetPaths.ENEMY_GATES[key], Color.WHITE)
-	AssetPaths.fit_sprite(gate_sprite, Vector2(190, 190) if story_stage_number == 2 else Vector2(200, 200))
+	AssetPaths.fit_sprite(gate_sprite, sz)
 
 
 func _update_gate2_sprite() -> void:
 	if gate2_sprite == null or not is_instance_valid(gate2_sprite):
 		return
-	var key := _gate_damage_key(float(gate2_hp) / float(GATE_HP_MAX_S2))
+	var max_hp2 := GATE_HP_MAX_S3 if story_stage_number >= 3 else GATE_HP_MAX_S2
+	var sz2 := Vector2(175, 175) if story_stage_number >= 3 else Vector2(190, 190)
+	var key := _gate_damage_key(float(gate2_hp) / float(max_hp2))
 	gate2_sprite.texture = AssetPaths.load_texture(AssetPaths.ENEMY_GATES[key], Color.WHITE)
-	AssetPaths.fit_sprite(gate2_sprite, Vector2(190, 190))
+	AssetPaths.fit_sprite(gate2_sprite, sz2)
+
+
+func _update_gate3_sprite() -> void:
+	if gate3_sprite == null or not is_instance_valid(gate3_sprite):
+		return
+	var key := _gate_damage_key(float(gate3_hp) / float(GATE_HP_MAX_S3))
+	gate3_sprite.texture = AssetPaths.load_texture(AssetPaths.ENEMY_GATES[key], Color.WHITE)
+	AssetPaths.fit_sprite(gate3_sprite, Vector2(175, 175))
+
+
+func _gate_explosion(pos: Vector2) -> void:
+	_spawn_effect(AssetPaths.EFFECTS["explosion_large"], pos, Vector2(300, 300), 1.0)
+	_spawn_effect(AssetPaths.EFFECTS["explosion_small"], pos + Vector2(50, -30), Vector2(120, 120), 0.55)
+	_spawn_effect(AssetPaths.EFFECTS["explosion_small"], pos + Vector2(-50, 25), Vector2(100, 100), 0.65)
+	if audio_manager != null:
+		audio_manager.play_sfx("explosion_large", -4.0)
+
+
+func _check_stage_clear() -> void:
+	var all_gone := gate_destroyed and gate2_destroyed and gate3_destroyed
+	if not all_gone:
+		return
+	match story_stage_number:
+		1: _game_over("STAGE 1 CLEAR", "Gate destroyed!\nTeam Score: %d" % team_score)
+		2: _game_over("STAGE 2 CLEAR", "Both gates destroyed!\nTeam Score: %d" % team_score)
+		3: _game_over("STAGE 3 CLEAR", "All three gates destroyed!\nTeam Score: %d" % team_score)
+		_: _game_over("STAGE %d CLEAR" % story_stage_number, "Team Score: %d" % team_score)
 
 
 func _destroy_gate() -> void:
 	gate_destroyed = true
 	if gate_sprite != null and is_instance_valid(gate_sprite):
-		_spawn_effect(AssetPaths.EFFECTS["explosion_large"], gate_pos, Vector2(300, 300), 1.0)
-		_spawn_effect(AssetPaths.EFFECTS["explosion_small"], gate_pos + Vector2(50, -30), Vector2(120, 120), 0.55)
-		_spawn_effect(AssetPaths.EFFECTS["explosion_small"], gate_pos + Vector2(-50, 25), Vector2(100, 100), 0.65)
+		_gate_explosion(gate_pos)
 		gate_sprite.queue_free()
 		gate_sprite = null
-	if audio_manager != null:
-		audio_manager.play_sfx("explosion_large", -4.0)
-	if story_stage_number == 2:
-		banner_label.text = "GATE 1 DESTROYED"
-		if gate2_destroyed:
-			_game_over("STAGE 2 CLEAR",
-				"Both gates destroyed!\nTeam Score: %d\nPress R to return to Home" % team_score)
-	else:
-		_game_over("STAGE 1 CLEAR",
-			"Gate destroyed!\nTeam Score: %d" % team_score)
-		banner_label.text = "GATE DESTROYED"
+	banner_label.text = "GATE 1 DESTROYED" if story_stage_number >= 2 else "GATE DESTROYED"
+	_check_stage_clear()
 
 
 func _destroy_gate2() -> void:
 	gate2_destroyed = true
 	if gate2_sprite != null and is_instance_valid(gate2_sprite):
-		_spawn_effect(AssetPaths.EFFECTS["explosion_large"], gate2_pos, Vector2(300, 300), 1.0)
-		_spawn_effect(AssetPaths.EFFECTS["explosion_small"], gate2_pos + Vector2(50, -30), Vector2(120, 120), 0.55)
-		_spawn_effect(AssetPaths.EFFECTS["explosion_small"], gate2_pos + Vector2(-50, 25), Vector2(100, 100), 0.65)
+		_gate_explosion(gate2_pos)
 		gate2_sprite.queue_free()
 		gate2_sprite = null
-	if audio_manager != null:
-		audio_manager.play_sfx("explosion_large", -4.0)
 	banner_label.text = "GATE 2 DESTROYED"
-	if gate_destroyed:
-		_game_over("STAGE 2 CLEAR",
-			"Both gates destroyed!\nTeam Score: %d\nPress R to return to Home" % team_score)
+	_check_stage_clear()
+
+
+func _destroy_gate3() -> void:
+	gate3_destroyed = true
+	if gate3_sprite != null and is_instance_valid(gate3_sprite):
+		_gate_explosion(gate3_pos)
+		gate3_sprite.queue_free()
+		gate3_sprite = null
+	banner_label.text = "GATE 3 DESTROYED"
+	_check_stage_clear()
 
 
 func _spawn_item() -> void:
@@ -4435,7 +4546,10 @@ func _update_story_hud_bar() -> void:
 
 	# ── Gate HP bar ──────────────────────────────────────────────────
 	if story_gate_bar_fill != null and story_gate_label != null:
-		var _max_hp1 := GATE_HP_MAX_S2 if story_stage_number == 2 else GATE_HP_MAX_S1
+		var _max_hp1: int
+		if story_stage_number >= 3: _max_hp1 = GATE_HP_MAX_S3
+		elif story_stage_number == 2: _max_hp1 = GATE_HP_MAX_S2
+		else: _max_hp1 = GATE_HP_MAX_S1
 		var _gate_ratio := clampf(float(gate_hp) / float(_max_hp1), 0.0, 1.0)
 		story_gate_bar_fill.size.x = 140.0 * _gate_ratio
 		var _gr := 0.85 + 0.15 * _gate_ratio
@@ -4446,16 +4560,28 @@ func _update_story_hud_bar() -> void:
 		else:
 			story_gate_label.text = "---"
 
-	if story_stage_number == 2 and story_gate2_bar_fill != null and story_gate2_label != null:
-		var _gate2_ratio := clampf(float(gate2_hp) / float(GATE_HP_MAX_S2), 0.0, 1.0)
+	if story_stage_number >= 2 and story_gate2_bar_fill != null and story_gate2_label != null:
+		var _max_hp2 := GATE_HP_MAX_S3 if story_stage_number >= 3 else GATE_HP_MAX_S2
+		var _gate2_ratio := clampf(float(gate2_hp) / float(_max_hp2), 0.0, 1.0)
 		story_gate2_bar_fill.size.x = 140.0 * _gate2_ratio
 		var _gr2 := 0.85 + 0.15 * _gate2_ratio
 		var _gg2 := _gate2_ratio * 0.55
 		story_gate2_bar_fill.color = Color(_gr2, _gg2, 0.05)
 		if gate2_sprite != null or gate2_destroyed:
-			story_gate2_label.text = "%d/%d" % [gate2_hp, GATE_HP_MAX_S2]
+			story_gate2_label.text = "%d/%d" % [gate2_hp, _max_hp2]
 		else:
 			story_gate2_label.text = "---"
+
+	if story_stage_number >= 3 and story_gate3_bar_fill != null and story_gate3_label != null:
+		var _gate3_ratio := clampf(float(gate3_hp) / float(GATE_HP_MAX_S3), 0.0, 1.0)
+		story_gate3_bar_fill.size.x = 140.0 * _gate3_ratio
+		var _gr3 := 0.85 + 0.15 * _gate3_ratio
+		var _gg3 := _gate3_ratio * 0.55
+		story_gate3_bar_fill.color = Color(_gr3, _gg3, 0.05)
+		if gate3_sprite != null or gate3_destroyed:
+			story_gate3_label.text = "%d/%d" % [gate3_hp, GATE_HP_MAX_S3]
+		else:
+			story_gate3_label.text = "---"
 
 	# ── CO-OP LINK / FUSION TIME (right side) ────────────────────────
 	# Container visible when link is building or fusion is active
@@ -4568,10 +4694,10 @@ func _game_over(title: String, message: String = "") -> void:
 	game_over_layer.visible = true
 	game_over_title.text = result_title
 	game_over_detail.text = result_message
-	var is_s1_clear := title.find("STAGE 1 CLEAR") >= 0
+	var show_next := title.find("STAGE 1 CLEAR") >= 0 or title.find("STAGE 2 CLEAR") >= 0
 	if result_next_stage_button != null:
-		result_next_stage_button.visible = is_s1_clear
-	_layout_result_buttons(is_s1_clear)
+		result_next_stage_button.visible = show_next
+	_layout_result_buttons(show_next)
 
 
 func _layout_result_buttons(show_next_stage: bool) -> void:
