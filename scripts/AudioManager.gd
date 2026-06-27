@@ -95,7 +95,7 @@ func _on_bgm_finished() -> void:
 		bgm_player.play()
 
 
-func play_sfx(key: String, volume_db: float = -4.0) -> void:
+func play_sfx(key: String, volume_db: float = -4.0, pitch_scale: float = 1.0) -> void:
 	_ensure_players()
 
 	if not AssetPaths.SFX.has(key):
@@ -112,6 +112,7 @@ func play_sfx(key: String, volume_db: float = -4.0) -> void:
 	player.bus = "Master"
 	player.stream = load(path)
 	player.volume_db = volume_db
+	player.pitch_scale = pitch_scale
 	add_child(player)
 	player.play()
 	player.finished.connect(player.queue_free)

@@ -232,6 +232,7 @@ var missiles: Array[Dictionary] = []
 var turrets: Array[Dictionary] = []
 var max_turrets := 3
 var emp_stun_timer := 0.0
+var gate_hit_sound_cd := 0.0   # throttle so gate-hit SFX doesn't spam
 
 # Astral Court
 var arena_time := 60.0
@@ -3482,6 +3483,8 @@ func _remove_bullet(index: int) -> void:
 	bullets.remove_at(index)
 
 func _update_story(delta: float) -> void:
+	gate_hit_sound_cd = maxf(0.0, gate_hit_sound_cd - delta)
+
 	if fusion_flash_timer > 0.0:
 		fusion_flash_timer -= delta
 		fusion_flash_rect.color.a = fusion_flash_timer / 0.35 * 0.82
@@ -3591,6 +3594,9 @@ func _update_story(delta: float) -> void:
 				if (_gb["pos"] as Vector2).distance_to(gate_pos) < 90.0 + float(_gb["radius"]):
 					gate_hp = max(0, gate_hp - int(_gb["damage"]))
 					_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _gb["pos"], Vector2(50, 50), 0.2)
+					if audio_manager != null and gate_hit_sound_cd <= 0.0:
+						audio_manager.play_sfx("hit_heavy", -14.0, 0.60)
+						gate_hit_sound_cd = 0.15
 					if is_instance_valid(_gb["sprite"]):
 						(_gb["sprite"] as Sprite2D).queue_free()
 					bullets.remove_at(_gi)
@@ -3615,6 +3621,9 @@ func _update_story(delta: float) -> void:
 				if (_g2b["pos"] as Vector2).distance_to(gate2_pos) < 90.0 + float(_g2b["radius"]):
 					gate2_hp = max(0, gate2_hp - int(_g2b["damage"]))
 					_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _g2b["pos"], Vector2(50, 50), 0.2)
+					if audio_manager != null and gate_hit_sound_cd <= 0.0:
+						audio_manager.play_sfx("hit_heavy", -14.0, 0.60)
+						gate_hit_sound_cd = 0.15
 					if is_instance_valid(_g2b["sprite"]):
 						(_g2b["sprite"] as Sprite2D).queue_free()
 					bullets.remove_at(_g2i)
@@ -3639,6 +3648,9 @@ func _update_story(delta: float) -> void:
 				if (_g3b["pos"] as Vector2).distance_to(gate3_pos) < 90.0 + float(_g3b["radius"]):
 					gate3_hp = max(0, gate3_hp - int(_g3b["damage"]))
 					_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _g3b["pos"], Vector2(50, 50), 0.2)
+					if audio_manager != null and gate_hit_sound_cd <= 0.0:
+						audio_manager.play_sfx("hit_heavy", -14.0, 0.60)
+						gate_hit_sound_cd = 0.15
 					if is_instance_valid(_g3b["sprite"]):
 						(_g3b["sprite"] as Sprite2D).queue_free()
 					bullets.remove_at(_g3i)
