@@ -20,10 +20,12 @@ enum GameMode { TITLE, STORY, ASTRAL_COURT, RAID }
 
 # ── ゲームバランス設定 ────────────────────────────────────────────────────────
 # ここの値を変えるだけでバランス調整できます。
-const CORE_HP_MAX    := 1000   # コアの最大体力（Story Mode）
-const GATE_HP_MAX_S1 := 10000   # ステージ1 敵ゲートの最大体力
-const GATE_HP_MAX_S2 :=  800   # ステージ2 敵ゲートの最大体力（×2基）
-const GATE_HP_MAX_S3 :=  60   # ステージ3 敵ゲートの最大体力（×3基）
+const CORE_HP_MAX            := 1000   # コアの最大体力（Story Mode）
+const GATE_HP_MAX_S1         := 1000   # ステージ1 敵ゲートの最大体力
+const GATE_HP_MAX_S2         :=  800   # ステージ2 敵ゲートの最大体力（×2基）
+const GATE_HP_MAX_S3         :=  600   # ステージ3 敵ゲートの最大体力（×3基）
+const GATE_HP_MAX_S4         := 3000   # ステージ4 ボスゲートの最大体力
+const GATE_BOSS_SHOOT_INTERVAL := 2.5  # ボスゲートの射撃間隔（秒）
 # ─────────────────────────────────────────────────────────────────────────────
 
 var mode: GameMode = GameMode.TITLE
@@ -236,6 +238,7 @@ var turrets: Array[Dictionary] = []
 var max_turrets := 3
 var emp_stun_timer := 0.0
 var gate_hit_sound_cd := 0.0   # throttle so gate-hit SFX doesn't spam
+var gate_boss_shoot_timer := 0.0  # ボスゲート射撃タイマー（Stage 4）
 
 # Astral Court
 var arena_time := 60.0
@@ -3063,7 +3066,21 @@ func _start_story() -> void:
 			(_gs as Sprite2D).queue_free()
 	gate_sprite = null; gate2_sprite = null; gate3_sprite = null
 
-	if story_stage_number == 3:
+	if story_stage_number == 4:
+		# Stage 4: single boss gate at center, high HP, shoots back
+		gate_hp = GATE_HP_MAX_S4; gate_pos = Vector2(screen_size.x * 0.5, 148.0)
+		gate_open = false; gate_open_timer = 0.0; gate_destroyed = false; gate_clear_timer = 0.0
+		gate_sprite = AssetPaths.create_sprite(AssetPaths.ENEMY_GATES["gate_0"], Vector2(240, 240), Color(1.0, 0.65, 0.95), 5)
+		gate_sprite.position = gate_pos; add_child(gate_sprite)
+		gate2_destroyed = true; gate3_destroyed = true
+		gate_boss_shoot_timer = GATE_BOSS_SHOOT_INTERVAL
+		if story_gate_header_label != null:
+			story_gate_header_label.text = "BOSS GATE"
+		for _b in [story_gate2_bar_bg, story_gate2_bar_fill, story_gate2_label,
+				   story_gate3_bar_bg, story_gate3_bar_fill, story_gate3_label]:
+			if _b != null: (_b as CanvasItem).visible = false
+
+	elif story_stage_number == 3:
 		# Stage 3: three gates at 20%, 50%, 80%
 		const _SZ3 := Vector2(175, 175)
 		gate_hp = GATE_HP_MAX_S3; gate_pos = Vector2(screen_size.x * 0.20, 165.0)
@@ -3226,6 +3243,7 @@ func _clear_game_objects() -> void:
 	gate3_open        = false
 	gate3_open_timer  = 0.0
 	gate3_destroyed   = false
+	gate_boss_shoot_timer = 0.0
 	for arr in [bullets, enemy_bullets, enemies, items, effects, bombs]:
 		for obj in arr:
 			if obj.has("sprite") and is_instance_valid(obj["sprite"]):
@@ -3620,6 +3638,13 @@ func _update_story(delta: float) -> void:
 						_destroy_gate()
 						break
 
+	# ── Boss Gate shooting (Stage 4) ────────────────────────────────
+	if story_stage_number == 4 and gate_open and not gate_destroyed and (not online_game_active or _is_game_host()):
+		gate_boss_shoot_timer -= delta
+		if gate_boss_shoot_timer <= 0.0:
+			gate_boss_shoot_timer = GATE_BOSS_SHOOT_INTERVAL
+			_spawn_gate_boss_bullets()
+
 	# ── Gate 2 (Stage 2+) ────────────────────────────────────────────
 	if story_stage_number >= 2 and gate2_sprite != null and not gate2_destroyed:
 		if not gate2_open and not story_intro_active:
@@ -3928,7 +3953,17 @@ func _story_twin_core_cannon() -> void:
 
 func _spawn_enemy() -> void:
 	var pool: Array[String]
-	if story_stage_number >= 3:
+	if story_stage_number >= 4:
+		# Stage 4: boss stage — only the toughest enemies
+		pool = [
+			"attacker", "attacker",
+			"tank", "tank",
+			"elite", "elite", "elite",
+			"phantom_dart", "phantom_dart",
+			"fortress_walker",
+			"bomber_drone", "bomber_drone",
+		]
+	elif story_stage_number >= 3:
 		# Stage 3: hardest mix — all enemy types
 		pool = [
 			"scout", "scout",
@@ -4197,7 +4232,9 @@ func _update_gate_sprite() -> void:
 		return
 	var max_hp: int
 	var sz: Vector2
-	if story_stage_number >= 3:
+	if story_stage_number >= 4:
+		max_hp = GATE_HP_MAX_S4; sz = Vector2(240, 240)
+	elif story_stage_number >= 3:
 		max_hp = GATE_HP_MAX_S3; sz = Vector2(175, 175)
 	elif story_stage_number == 2:
 		max_hp = GATE_HP_MAX_S2; sz = Vector2(190, 190)
@@ -4226,6 +4263,38 @@ func _update_gate3_sprite() -> void:
 	AssetPaths.fit_sprite(gate3_sprite, Vector2(175, 175))
 
 
+func _spawn_gate_boss_bullets() -> void:
+	if players.is_empty():
+		return
+	# Target the nearest alive player
+	var target_pos: Vector2 = base_sprite.position
+	for _bp in players:
+		var _bpid: int = int(_bp["id"]) - 1
+		if _bpid < player_lives.size() and player_lives[_bpid] > 0:
+			target_pos = _bp["pos"] as Vector2
+			break
+	var origin := gate_pos + Vector2(0.0, 90.0)
+	var base_dir := (target_pos - origin).normalized()
+	# 5-bullet spread: -40, -20, 0, +20, +40 degrees
+	for _angle_deg in [-40.0, -20.0, 0.0, 20.0, 40.0]:
+		var dir := base_dir.rotated(deg_to_rad(_angle_deg))
+		var _bs := AssetPaths.create_sprite(AssetPaths.PROJECTILES["boss_orb"], Vector2(38, 38), Color(1.0, 0.35, 0.9), 9)
+		_bs.position = origin
+		_bs.rotation = dir.angle() + PI * 0.5
+		add_child(_bs)
+		enemy_bullets.append({
+			"pos": origin,
+			"vel": dir * 290.0,
+			"damage": 20,
+			"sprite": _bs,
+			"radius": 19.0,
+			"life": 5.0,
+		})
+	if audio_manager != null:
+		audio_manager.play_sfx("shot_boss", -6.0)
+	_spawn_effect(AssetPaths.EFFECTS["hit_spark"], gate_pos + Vector2(0, 60), Vector2(80, 80), 0.18)
+
+
 func _gate_explosion(pos: Vector2) -> void:
 	_spawn_effect(AssetPaths.EFFECTS["explosion_large"], pos, Vector2(300, 300), 1.0)
 	_spawn_effect(AssetPaths.EFFECTS["explosion_small"], pos + Vector2(50, -30), Vector2(120, 120), 0.55)
@@ -4242,6 +4311,7 @@ func _check_stage_clear() -> void:
 		1: _game_over("STAGE 1 CLEAR", "Gate destroyed!\nTeam Score: %d" % team_score)
 		2: _game_over("STAGE 2 CLEAR", "Both gates destroyed!\nTeam Score: %d" % team_score)
 		3: _game_over("STAGE 3 CLEAR", "All three gates destroyed!\nTeam Score: %d" % team_score)
+		4: _game_over("STAGE 4 CLEAR", "Boss Gate destroyed!\nTeam Score: %d" % team_score)
 		_: _game_over("STAGE %d CLEAR" % story_stage_number, "Team Score: %d" % team_score)
 
 
@@ -4616,7 +4686,8 @@ func _update_story_hud_bar() -> void:
 	# ── Gate HP bar ──────────────────────────────────────────────────
 	if story_gate_bar_fill != null and story_gate_label != null:
 		var _max_hp1: int
-		if story_stage_number >= 3: _max_hp1 = GATE_HP_MAX_S3
+		if story_stage_number >= 4: _max_hp1 = GATE_HP_MAX_S4
+		elif story_stage_number >= 3: _max_hp1 = GATE_HP_MAX_S3
 		elif story_stage_number == 2: _max_hp1 = GATE_HP_MAX_S2
 		else: _max_hp1 = GATE_HP_MAX_S1
 		var _gate_ratio := clampf(float(gate_hp) / float(_max_hp1), 0.0, 1.0)
@@ -4763,7 +4834,7 @@ func _game_over(title: String, message: String = "") -> void:
 	game_over_layer.visible = true
 	game_over_title.text = result_title
 	game_over_detail.text = result_message
-	var show_next := title.find("STAGE 1 CLEAR") >= 0 or title.find("STAGE 2 CLEAR") >= 0
+	var show_next := title.find("STAGE 1 CLEAR") >= 0 or title.find("STAGE 2 CLEAR") >= 0 or title.find("STAGE 3 CLEAR") >= 0
 	if result_next_stage_button != null:
 		result_next_stage_button.visible = show_next
 	_layout_result_buttons(show_next)
@@ -5447,22 +5518,24 @@ func _setup_stage_select() -> void:
 		Color(0.04, 0.10, 0.26),
 		Color(0.18, 0.09, 0.02),
 		Color(0.20, 0.03, 0.04),
+		Color(0.14, 0.02, 0.22),
 	]
 	const _CARD_BORDER: Array[Color] = [
 		Color(0.24, 0.68, 1.0),
 		Color(1.0, 0.55, 0.12),
 		Color(1.0, 0.22, 0.10),
+		Color(0.85, 0.22, 1.0),
 	]
-	const _GATE_TEXT: Array[String] = ["1 GATE", "2 GATES", "3 GATES"]
-	const _DIFF_TEXT: Array[String] = ["NORMAL", "HARD", "VERY HARD"]
+	const _GATE_TEXT: Array[String] = ["1 GATE", "2 GATES", "3 GATES", "BOSS GATE"]
+	const _DIFF_TEXT: Array[String] = ["NORMAL", "HARD", "VERY HARD", "EXTREME"]
 
-	var card_w := 680.0
+	var card_w := 540.0
 	var card_h := 520.0
-	var card_gap := 30.0
+	var card_gap := 20.0
 	var card_y := 240.0
-	var start_x := (screen_size.x - (card_w * 3.0 + card_gap * 2.0)) * 0.5
+	var start_x := (screen_size.x - (card_w * 4.0 + card_gap * 3.0)) * 0.5
 
-	for i in range(3):
+	for i in range(4):
 		var cx_card := start_x + float(i) * (card_w + card_gap)
 		var stage_n := i + 1
 
@@ -5486,47 +5559,47 @@ func _setup_stage_select() -> void:
 		num_lbl.position = Vector2(cx_card, card_y + 55.0)
 		num_lbl.size = Vector2(card_w, 85.0)
 		num_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		num_lbl.add_theme_font_size_override("font_size", 58)
+		num_lbl.add_theme_font_size_override("font_size", 50)
 		num_lbl.add_theme_color_override("font_color", _CARD_BORDER[i])
 		stage_select_layer.add_child(num_lbl)
 
 		var sep := ColorRect.new()
-		sep.position = Vector2(cx_card + 60.0, card_y + 165.0)
-		sep.size = Vector2(card_w - 120.0, 2.0)
+		sep.position = Vector2(cx_card + 50.0, card_y + 163.0)
+		sep.size = Vector2(card_w - 100.0, 2.0)
 		sep.color = Color(_CARD_BORDER[i].r, _CARD_BORDER[i].g, _CARD_BORDER[i].b, 0.45)
 		stage_select_layer.add_child(sep)
 
 		var gate_lbl := Label.new()
 		gate_lbl.text = _GATE_TEXT[i]
-		gate_lbl.position = Vector2(cx_card, card_y + 200.0)
+		gate_lbl.position = Vector2(cx_card, card_y + 195.0)
 		gate_lbl.size = Vector2(card_w, 65.0)
 		gate_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		gate_lbl.add_theme_font_size_override("font_size", 42)
+		gate_lbl.add_theme_font_size_override("font_size", 38)
 		gate_lbl.add_theme_color_override("font_color", Color(0.90, 0.95, 1.0))
 		stage_select_layer.add_child(gate_lbl)
 
 		var diff_lbl := Label.new()
 		diff_lbl.text = _DIFF_TEXT[i]
-		diff_lbl.position = Vector2(cx_card, card_y + 285.0)
+		diff_lbl.position = Vector2(cx_card, card_y + 278.0)
 		diff_lbl.size = Vector2(card_w, 50.0)
 		diff_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		diff_lbl.add_theme_font_size_override("font_size", 30)
+		diff_lbl.add_theme_font_size_override("font_size", 28)
 		diff_lbl.add_theme_color_override("font_color", Color(0.65, 0.78, 0.90, 0.85))
 		stage_select_layer.add_child(diff_lbl)
 
 		var start_btn := Button.new()
 		start_btn.text = "START"
-		start_btn.position = Vector2(cx_card + 170.0, card_y + 400.0)
-		start_btn.size = Vector2(340.0, 72.0)
-		start_btn.add_theme_font_size_override("font_size", 32)
+		start_btn.position = Vector2(cx_card + 110.0, card_y + 402.0)
+		start_btn.size = Vector2(320.0, 70.0)
+		start_btn.add_theme_font_size_override("font_size", 30)
 		var _norm := StyleBoxFlat.new()
-		_norm.bg_color = Color(_CARD_BORDER[i].r * 0.3, _CARD_BORDER[i].g * 0.3, _CARD_BORDER[i].b * 0.3)
+		_norm.bg_color = Color(_CARD_BORDER[i].r * 0.28, _CARD_BORDER[i].g * 0.28, _CARD_BORDER[i].b * 0.28)
 		_norm.border_color = _CARD_BORDER[i]
 		_norm.set_border_width_all(2)
 		_norm.set_corner_radius_all(14)
 		start_btn.add_theme_stylebox_override("normal", _norm)
 		var _hov := StyleBoxFlat.new()
-		_hov.bg_color = Color(_CARD_BORDER[i].r * 0.55, _CARD_BORDER[i].g * 0.55, _CARD_BORDER[i].b * 0.55)
+		_hov.bg_color = Color(_CARD_BORDER[i].r * 0.52, _CARD_BORDER[i].g * 0.52, _CARD_BORDER[i].b * 0.52)
 		_hov.border_color = Color.WHITE
 		_hov.set_border_width_all(3)
 		_hov.set_corner_radius_all(14)
