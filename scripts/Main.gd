@@ -3595,7 +3595,7 @@ func _update_story(delta: float) -> void:
 					gate_hp = max(0, gate_hp - int(_gb["damage"]))
 					_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _gb["pos"], Vector2(50, 50), 0.2)
 					if audio_manager != null and gate_hit_sound_cd <= 0.0:
-						audio_manager.play_sfx("hit_heavy", -14.0, 0.60)
+						audio_manager.play_sfx("hit_heavy", -4.0, 0.45)
 						gate_hit_sound_cd = 0.15
 					if is_instance_valid(_gb["sprite"]):
 						(_gb["sprite"] as Sprite2D).queue_free()
@@ -3622,7 +3622,7 @@ func _update_story(delta: float) -> void:
 					gate2_hp = max(0, gate2_hp - int(_g2b["damage"]))
 					_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _g2b["pos"], Vector2(50, 50), 0.2)
 					if audio_manager != null and gate_hit_sound_cd <= 0.0:
-						audio_manager.play_sfx("hit_heavy", -14.0, 0.60)
+						audio_manager.play_sfx("hit_heavy", -4.0, 0.45)
 						gate_hit_sound_cd = 0.15
 					if is_instance_valid(_g2b["sprite"]):
 						(_g2b["sprite"] as Sprite2D).queue_free()
@@ -3649,7 +3649,7 @@ func _update_story(delta: float) -> void:
 					gate3_hp = max(0, gate3_hp - int(_g3b["damage"]))
 					_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _g3b["pos"], Vector2(50, 50), 0.2)
 					if audio_manager != null and gate_hit_sound_cd <= 0.0:
-						audio_manager.play_sfx("hit_heavy", -14.0, 0.60)
+						audio_manager.play_sfx("hit_heavy", -4.0, 0.45)
 						gate_hit_sound_cd = 0.15
 					if is_instance_valid(_g3b["sprite"]):
 						(_g3b["sprite"] as Sprite2D).queue_free()
