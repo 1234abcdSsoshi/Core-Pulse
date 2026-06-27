@@ -20,7 +20,10 @@ enum GameMode { TITLE, STORY, ASTRAL_COURT, RAID }
 
 # ── ゲームバランス設定 ────────────────────────────────────────────────────────
 # ここの値を変えるだけでバランス調整できます。
-const CORE_HP_MAX := 1000      # コアの最大体力（Story Mode）
+const CORE_HP_MAX    := 1000   # コアの最大体力（Story Mode）
+const GATE_HP_MAX_S1 := 1000   # ステージ1 敵ゲートの最大体力
+const GATE_HP_MAX_S2 :=  800   # ステージ2 敵ゲートの最大体力（×2基）
+const GATE_HP_MAX_S3 :=  600   # ステージ3 敵ゲートの最大体力（×3基）
 # ─────────────────────────────────────────────────────────────────────────────
 
 var mode: GameMode = GameMode.TITLE
@@ -311,13 +314,11 @@ var gate_open := false
 var gate_open_timer := 0.0
 var gate_destroyed := false
 var gate_clear_timer := 0.0
-const GATE_HP_MAX_S1 := 1000
 const GATE_OPEN_DELAY := 1.5
 const GATE_CLEAR_DELAY := 3.0
 
 # Stage 2 second gate
 var story_stage_number := 1
-const GATE_HP_MAX_S2 := 800
 var gate2_sprite: Sprite2D = null
 var gate2_hp := 0
 var gate2_pos := Vector2.ZERO
@@ -326,7 +327,6 @@ var gate2_open_timer := 0.0
 var gate2_destroyed := false
 
 # Stage 3 third gate
-const GATE_HP_MAX_S3 := 600
 var gate3_sprite: Sprite2D = null
 var gate3_hp := 0
 var gate3_pos := Vector2.ZERO
