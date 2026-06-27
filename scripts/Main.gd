@@ -2480,17 +2480,22 @@ func _setup_instruction_screen() -> void:
 
 
 func _setup_result_buttons() -> void:
-	# Mouse buttons for the result screen.
-	# R key still works, but these buttons make the UI playable with a mouse.
-	result_retry_button = _create_premium_button("RETRY", Vector2(screen_size.x * 0.5 - 330.0, screen_size.y * 0.5 + 142.0), Vector2(280, 72))
+	# Three buttons on one row: REPLAY | HOME | NEXT STAGE
+	# Each 280px wide, 14px gap → total 868px, centered.
+	var cx := screen_size.x * 0.5
+	var by := screen_size.y * 0.5 + 142.0
+	var bw := 280.0
+	var gap := 14.0
+
+	result_retry_button = _create_premium_button("REPLAY", Vector2(cx - 434.0, by), Vector2(bw, 72))
 	result_retry_button.pressed.connect(_on_result_retry_pressed)
 	game_over_layer.add_child(result_retry_button)
 
-	result_home_button = _create_premium_button("HOME", Vector2(screen_size.x * 0.5 + 50.0, screen_size.y * 0.5 + 142.0), Vector2(280, 72))
+	result_home_button = _create_premium_button("HOME", Vector2(cx - 434.0 + bw + gap, by), Vector2(bw, 72))
 	result_home_button.pressed.connect(_on_result_home_pressed)
 	game_over_layer.add_child(result_home_button)
 
-	result_next_stage_button = _create_premium_button("NEXT STAGE →", Vector2(screen_size.x * 0.5 - 140.0, screen_size.y * 0.5 + 228.0), Vector2(280, 72))
+	result_next_stage_button = _create_premium_button("NEXT STAGE →", Vector2(cx - 434.0 + (bw + gap) * 2, by), Vector2(bw, 72))
 	result_next_stage_button.pressed.connect(_on_result_next_stage_pressed)
 	result_next_stage_button.visible = false
 	game_over_layer.add_child(result_next_stage_button)
