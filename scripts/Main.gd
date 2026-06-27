@@ -21,9 +21,9 @@ enum GameMode { TITLE, STORY, ASTRAL_COURT, RAID }
 # ── ゲームバランス設定 ────────────────────────────────────────────────────────
 # ここの値を変えるだけでバランス調整できます。
 const CORE_HP_MAX    := 1000   # コアの最大体力（Story Mode）
-const GATE_HP_MAX_S1 := 1000   # ステージ1 敵ゲートの最大体力
+const GATE_HP_MAX_S1 := 10000   # ステージ1 敵ゲートの最大体力
 const GATE_HP_MAX_S2 :=  800   # ステージ2 敵ゲートの最大体力（×2基）
-const GATE_HP_MAX_S3 :=  600   # ステージ3 敵ゲートの最大体力（×3基）
+const GATE_HP_MAX_S3 :=  60   # ステージ3 敵ゲートの最大体力（×3基）
 # ─────────────────────────────────────────────────────────────────────────────
 
 var mode: GameMode = GameMode.TITLE
@@ -300,6 +300,8 @@ var game_over_detail: Label
 var result_home_button: Button
 var result_retry_button: Button
 var result_next_stage_button: Button
+var result_stage_button: Button
+var stage_select_layer: CanvasLayer
 var banner_label: Label
 var link_back: ColorRect
 var link_fill: Sprite2D
@@ -1131,6 +1133,7 @@ func _setup_ui() -> void:
 	_setup_online_status_hud()
 	_setup_story_mode_select()
 	_setup_char_select()
+	_setup_stage_select()
 
 	game_over_layer = CanvasLayer.new()
 	game_over_layer.layer = 30
@@ -2516,25 +2519,30 @@ func _setup_instruction_screen() -> void:
 
 
 func _setup_result_buttons() -> void:
-	# Three buttons on one row: REPLAY | HOME | NEXT STAGE
-	# Each 280px wide, 14px gap → total 868px, centered.
 	var cx := screen_size.x * 0.5
-	var by := screen_size.y * 0.5 + 142.0
+	var by := screen_size.y * 0.5 + 152.0
 	var bw := 280.0
 	var gap := 14.0
 
-	result_retry_button = _create_premium_button("REPLAY", Vector2(cx - 434.0, by), Vector2(bw, 72))
-	result_retry_button.pressed.connect(_on_result_retry_pressed)
-	game_over_layer.add_child(result_retry_button)
-
-	result_home_button = _create_premium_button("HOME", Vector2(cx - 434.0 + bw + gap, by), Vector2(bw, 72))
-	result_home_button.pressed.connect(_on_result_home_pressed)
-	game_over_layer.add_child(result_home_button)
-
-	result_next_stage_button = _create_premium_button("NEXT STAGE →", Vector2(cx - 434.0 + (bw + gap) * 2, by), Vector2(bw, 72))
+	# Upper center: NEXT STAGE (hidden until a stage clear that has a next stage)
+	result_next_stage_button = _create_premium_button("NEXT STAGE →", Vector2(cx - 170.0, by - 100.0), Vector2(340.0, 72.0))
 	result_next_stage_button.pressed.connect(_on_result_next_stage_pressed)
 	result_next_stage_button.visible = false
 	game_over_layer.add_child(result_next_stage_button)
+
+	# Lower row: REPLAY | STAGE | HOME (always shown)
+	var start := cx - 434.0
+	result_retry_button = _create_premium_button("REPLAY", Vector2(start, by), Vector2(bw, 72))
+	result_retry_button.pressed.connect(_on_result_retry_pressed)
+	game_over_layer.add_child(result_retry_button)
+
+	result_stage_button = _create_premium_button("STAGE", Vector2(start + bw + gap, by), Vector2(bw, 72))
+	result_stage_button.pressed.connect(_on_result_stage_pressed)
+	game_over_layer.add_child(result_stage_button)
+
+	result_home_button = _create_premium_button("HOME", Vector2(start + (bw + gap) * 2.0, by), Vector2(bw, 72))
+	result_home_button.pressed.connect(_on_result_home_pressed)
+	game_over_layer.add_child(result_home_button)
 
 
 
@@ -2826,6 +2834,13 @@ func _on_result_retry_pressed() -> void:
 	game_over = false
 	game_over_layer.visible = false
 	_load_stage(last_stage_script)
+
+
+func _on_result_stage_pressed() -> void:
+	game_over = false
+	game_over_layer.visible = false
+	_stage_carry = {}
+	_show_stage_select()
 
 
 func _show_title() -> void:
@@ -4755,23 +4770,8 @@ func _game_over(title: String, message: String = "") -> void:
 
 
 func _layout_result_buttons(show_next_stage: bool) -> void:
-	if result_retry_button == null or result_home_button == null:
-		return
-	var cx := screen_size.x * 0.5
-	var by := screen_size.y * 0.5 + 142.0
-	var bw := 280.0
-	var gap := 14.0
-	if show_next_stage and result_next_stage_button != null:
-		# 3 buttons: REPLAY | HOME | NEXT STAGE  (868px total)
-		var start := cx - 434.0
-		result_retry_button.position      = Vector2(start, by)
-		result_home_button.position       = Vector2(start + bw + gap, by)
-		result_next_stage_button.position = Vector2(start + (bw + gap) * 2.0, by)
-	else:
-		# 2 buttons: REPLAY | HOME  (574px total)
-		var start := cx - 287.0
-		result_retry_button.position = Vector2(start, by)
-		result_home_button.position  = Vector2(start + bw + gap, by)
+	if result_next_stage_button != null:
+		result_next_stage_button.visible = show_next_stage
 
 
 class _DebugDraw extends Node2D:
@@ -5409,4 +5409,148 @@ func _apply_cs_configs_and_start() -> void:
 		online_game_active = false
 		set_online_input_mode(true, 1)
 	char_select_layer.visible = false
+	_show_stage_select()
+
+
+# ─── Stage Select ──────────────────────────────────────────────────────────────
+
+func _setup_stage_select() -> void:
+	stage_select_layer = CanvasLayer.new()
+	stage_select_layer.layer = 24
+	stage_select_layer.visible = false
+	add_child(stage_select_layer)
+
+	var bg := ColorRect.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.0, 0.02, 0.06, 0.97)
+	stage_select_layer.add_child(bg)
+
+	var title_lbl := Label.new()
+	title_lbl.text = "SELECT STAGE"
+	title_lbl.position = Vector2(0.0, 72.0)
+	title_lbl.size = Vector2(screen_size.x, 100.0)
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 68)
+	title_lbl.add_theme_color_override("font_color", Color(0.24, 1.0, 0.86))
+	stage_select_layer.add_child(title_lbl)
+
+	var sub_lbl := Label.new()
+	sub_lbl.text = "Choose your mission"
+	sub_lbl.position = Vector2(0.0, 175.0)
+	sub_lbl.size = Vector2(screen_size.x, 44.0)
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.add_theme_font_size_override("font_size", 28)
+	sub_lbl.add_theme_color_override("font_color", Color(0.65, 0.82, 1.0))
+	stage_select_layer.add_child(sub_lbl)
+
+	const _CARD_BG: Array[Color] = [
+		Color(0.04, 0.10, 0.26),
+		Color(0.18, 0.09, 0.02),
+		Color(0.20, 0.03, 0.04),
+	]
+	const _CARD_BORDER: Array[Color] = [
+		Color(0.24, 0.68, 1.0),
+		Color(1.0, 0.55, 0.12),
+		Color(1.0, 0.22, 0.10),
+	]
+	const _GATE_TEXT: Array[String] = ["1 GATE", "2 GATES", "3 GATES"]
+	const _DIFF_TEXT: Array[String] = ["NORMAL", "HARD", "VERY HARD"]
+
+	var card_w := 680.0
+	var card_h := 520.0
+	var card_gap := 30.0
+	var card_y := 240.0
+	var start_x := (screen_size.x - (card_w * 3.0 + card_gap * 2.0)) * 0.5
+
+	for i in range(3):
+		var cx_card := start_x + float(i) * (card_w + card_gap)
+		var stage_n := i + 1
+
+		var card_bg := ColorRect.new()
+		card_bg.position = Vector2(cx_card, card_y)
+		card_bg.size = Vector2(card_w, card_h)
+		card_bg.color = _CARD_BG[i]
+		stage_select_layer.add_child(card_bg)
+
+		var _add_border := func(pos: Vector2, sz: Vector2) -> void:
+			var r := ColorRect.new()
+			r.position = pos; r.size = sz; r.color = _CARD_BORDER[i]
+			stage_select_layer.add_child(r)
+		_add_border.call(Vector2(cx_card, card_y), Vector2(card_w, 3.0))
+		_add_border.call(Vector2(cx_card, card_y + card_h - 3.0), Vector2(card_w, 3.0))
+		_add_border.call(Vector2(cx_card, card_y), Vector2(3.0, card_h))
+		_add_border.call(Vector2(cx_card + card_w - 3.0, card_y), Vector2(3.0, card_h))
+
+		var num_lbl := Label.new()
+		num_lbl.text = "STAGE %d" % stage_n
+		num_lbl.position = Vector2(cx_card, card_y + 55.0)
+		num_lbl.size = Vector2(card_w, 85.0)
+		num_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		num_lbl.add_theme_font_size_override("font_size", 58)
+		num_lbl.add_theme_color_override("font_color", _CARD_BORDER[i])
+		stage_select_layer.add_child(num_lbl)
+
+		var sep := ColorRect.new()
+		sep.position = Vector2(cx_card + 60.0, card_y + 165.0)
+		sep.size = Vector2(card_w - 120.0, 2.0)
+		sep.color = Color(_CARD_BORDER[i].r, _CARD_BORDER[i].g, _CARD_BORDER[i].b, 0.45)
+		stage_select_layer.add_child(sep)
+
+		var gate_lbl := Label.new()
+		gate_lbl.text = _GATE_TEXT[i]
+		gate_lbl.position = Vector2(cx_card, card_y + 200.0)
+		gate_lbl.size = Vector2(card_w, 65.0)
+		gate_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		gate_lbl.add_theme_font_size_override("font_size", 42)
+		gate_lbl.add_theme_color_override("font_color", Color(0.90, 0.95, 1.0))
+		stage_select_layer.add_child(gate_lbl)
+
+		var diff_lbl := Label.new()
+		diff_lbl.text = _DIFF_TEXT[i]
+		diff_lbl.position = Vector2(cx_card, card_y + 285.0)
+		diff_lbl.size = Vector2(card_w, 50.0)
+		diff_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		diff_lbl.add_theme_font_size_override("font_size", 30)
+		diff_lbl.add_theme_color_override("font_color", Color(0.65, 0.78, 0.90, 0.85))
+		stage_select_layer.add_child(diff_lbl)
+
+		var start_btn := Button.new()
+		start_btn.text = "START"
+		start_btn.position = Vector2(cx_card + 170.0, card_y + 400.0)
+		start_btn.size = Vector2(340.0, 72.0)
+		start_btn.add_theme_font_size_override("font_size", 32)
+		var _norm := StyleBoxFlat.new()
+		_norm.bg_color = Color(_CARD_BORDER[i].r * 0.3, _CARD_BORDER[i].g * 0.3, _CARD_BORDER[i].b * 0.3)
+		_norm.border_color = _CARD_BORDER[i]
+		_norm.set_border_width_all(2)
+		_norm.set_corner_radius_all(14)
+		start_btn.add_theme_stylebox_override("normal", _norm)
+		var _hov := StyleBoxFlat.new()
+		_hov.bg_color = Color(_CARD_BORDER[i].r * 0.55, _CARD_BORDER[i].g * 0.55, _CARD_BORDER[i].b * 0.55)
+		_hov.border_color = Color.WHITE
+		_hov.set_border_width_all(3)
+		_hov.set_corner_radius_all(14)
+		start_btn.add_theme_stylebox_override("hover", _hov)
+		start_btn.add_theme_color_override("font_color", Color(0.95, 0.98, 1.0))
+		start_btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 0.85))
+		start_btn.pressed.connect(_on_stage_number_selected.bind(stage_n))
+		stage_select_layer.add_child(start_btn)
+
+	var back_btn := _create_premium_button("← BACK", Vector2(screen_size.x * 0.5 - 140.0, 830.0), Vector2(280.0, 64.0))
+	back_btn.pressed.connect(_on_stage_select_back)
+	stage_select_layer.add_child(back_btn)
+
+
+func _show_stage_select() -> void:
+	stage_select_layer.visible = true
+
+
+func _on_stage_select_back() -> void:
+	stage_select_layer.visible = false
+	char_select_layer.visible = true
+
+
+func _on_stage_number_selected(n: int) -> void:
+	story_stage_number = n
+	stage_select_layer.visible = false
 	_load_stage(StoryStageScript)
