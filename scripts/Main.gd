@@ -4571,6 +4571,27 @@ func _game_over(title: String, message: String = "") -> void:
 	var is_s1_clear := title.find("STAGE 1 CLEAR") >= 0
 	if result_next_stage_button != null:
 		result_next_stage_button.visible = is_s1_clear
+	_layout_result_buttons(is_s1_clear)
+
+
+func _layout_result_buttons(show_next_stage: bool) -> void:
+	if result_retry_button == null or result_home_button == null:
+		return
+	var cx := screen_size.x * 0.5
+	var by := screen_size.y * 0.5 + 142.0
+	var bw := 280.0
+	var gap := 14.0
+	if show_next_stage and result_next_stage_button != null:
+		# 3 buttons: REPLAY | HOME | NEXT STAGE  (868px total)
+		var start := cx - 434.0
+		result_retry_button.position      = Vector2(start, by)
+		result_home_button.position       = Vector2(start + bw + gap, by)
+		result_next_stage_button.position = Vector2(start + (bw + gap) * 2.0, by)
+	else:
+		# 2 buttons: REPLAY | HOME  (574px total)
+		var start := cx - 287.0
+		result_retry_button.position = Vector2(start, by)
+		result_home_button.position  = Vector2(start + bw + gap, by)
 
 
 class _DebugDraw extends Node2D:
