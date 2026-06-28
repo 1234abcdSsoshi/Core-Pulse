@@ -62,6 +62,18 @@ var _settings_fs_btn: Button
 var _settings_bgm_val_lbl: Label
 var _settings_sfx_val_lbl: Label
 
+# ── Local Multiplayer Room ────────────────────────────────────────────────────
+var local_room_layer: CanvasLayer = null
+var _lr_slots: Array = []
+var _lr_card_ui: Array = []
+var _lr_start_btn: Button = null
+var _lr_came_from_local_room: bool = false
+var _lr_online_status_lbl: Label = null
+var _lr_room_code_lbl: Label = null
+var _lr_create_room_btn: Button = null
+var _lr_connect_btn: Button = null
+var _lr_has_online_players: bool = false
+
 # Online input abstraction Step 1-3.
 # The game asks input_router for P1/P2 input instead of reading all keys directly.
 var input_router: InputRouter
@@ -864,6 +876,8 @@ func _update_network_input_sending(delta: float) -> void:
 func _on_network_status_changed(status: String) -> void:
 	network_last_status = status
 	print("[Network] Status: " + status)
+	if local_room_layer != null and local_room_layer.visible:
+		_lr_update_online_ui()
 	if online_lobby != null:
 		online_lobby.set_network_status(status)
 		if status == "connected" and network_client != null:
@@ -1011,6 +1025,8 @@ func _on_network_room_changed(new_room_id: String) -> void:
 	network_join_room_code = new_room_id
 	network_last_message = "Room: " + new_room_id
 	print("[Network] Room: " + new_room_id)
+	if local_room_layer != null and local_room_layer.visible:
+		_lr_update_online_ui()
 	if char_select_layer != null and char_select_layer.visible:
 		if _cs_room_lbl != null:
 			_cs_room_lbl.text = "ROOM: " + new_room_id
@@ -1024,6 +1040,8 @@ func _on_network_peer_joined(player_id: int) -> void:
 	network_peer_status = "P%d joined" % player_id
 	network_last_message = network_peer_status
 	print("[Network] Peer joined: P%d" % player_id)
+	if local_room_layer != null and local_room_layer.visible:
+		_lr_mark_online_slot(player_id)
 	if online_lobby != null:
 		online_lobby.set_status_message(network_peer_status)
 
@@ -1032,6 +1050,8 @@ func _on_network_peer_left(player_id: int) -> void:
 	network_peer_status = "P%d left" % player_id
 	network_last_message = network_peer_status
 	print("[Network] Peer left: P%d" % player_id)
+	if local_room_layer != null and local_room_layer.visible:
+		_lr_clear_online_slot(player_id)
 	if online_lobby != null:
 		online_lobby.set_status_message(network_peer_status)
 
@@ -1275,6 +1295,7 @@ func _setup_ui() -> void:
 	_setup_shop_ui()
 	_setup_shop_hud_button()
 	_setup_settings_button()
+	_setup_local_room()
 
 func _setup_pause_menu() -> void:
 	pause_layer = CanvasLayer.new()
@@ -5626,13 +5647,7 @@ func _on_story_multi_selected() -> void:
 	if audio_manager != null:
 		audio_manager.play_sfx("ui_confirm", -6.0)
 	story_mode_select_layer.visible = false
-	char_select_mode = "multi"
-	_cs_configs[0]["joined"] = true;  _cs_configs[0]["ready"] = false
-	for _mi in range(1, 4):
-		_cs_configs[_mi]["joined"] = false
-		_cs_configs[_mi]["ready"] = false
-	_update_char_select()
-	char_select_layer.visible = true
+	_lr_open()
 
 
 # ─── Character Select ─────────────────────────────────────────────────────────
@@ -6561,10 +6576,517 @@ func _show_stage_select() -> void:
 
 func _on_stage_select_back() -> void:
 	stage_select_layer.visible = false
-	char_select_layer.visible = true
+	if _lr_came_from_local_room:
+		_lr_came_from_local_room = false
+		local_room_layer.visible = true
+	else:
+		char_select_layer.visible = true
 
 
 func _on_stage_number_selected(n: int) -> void:
 	story_stage_number = n
 	stage_select_layer.visible = false
 	_load_stage(StoryStageScript)
+
+
+# ── Local Multiplayer Room ─────────────────────────────────────────────────────
+
+const _LR_SHIP_NAMES := ["Azure Wing", "Solar Fang", "Emerald Claw", "Violet Phantom"]
+const _LR_SHIP_KEYS := ["p1", "p2", "p3", "p4"]
+const _LR_P_COLORS := [
+	Color(0.14, 1.0, 0.85),
+	Color(1.0, 0.79, 0.16),
+	Color(0.43, 0.96, 0.55),
+	Color(0.81, 0.48, 1.0),
+]
+
+
+func _setup_local_room() -> void:
+	local_room_layer = CanvasLayer.new()
+	local_room_layer.layer = 21
+	local_room_layer.visible = false
+	add_child(local_room_layer)
+
+	_lr_slots = []
+	_lr_card_ui = []
+	for i in range(4):
+		_lr_slots.append({"active": i == 0, "is_cpu": false, "ship_idx": i})
+
+	var dim := ColorRect.new()
+	dim.position = Vector2.ZERO
+	dim.size = screen_size
+	dim.color = Color(0.0, 0.03, 0.09, 0.96)
+	local_room_layer.add_child(dim)
+
+	var ttl := Label.new()
+	ttl.text = "MULTI PLAYER ROOM"
+	ttl.position = Vector2(0.0, 22.0)
+	ttl.size = Vector2(screen_size.x, 80.0)
+	ttl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ttl.add_theme_font_size_override("font_size", 56)
+	ttl.add_theme_color_override("font_color", Color(0.24, 1.0, 0.86))
+	local_room_layer.add_child(ttl)
+
+	var hint := Label.new()
+	hint.text = "P1: WASD + F  |  P2: Arrow + L  |  P3: Numpad"
+	hint.position = Vector2(0.0, 108.0)
+	hint.size = Vector2(screen_size.x, 40.0)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 24)
+	hint.add_theme_color_override("font_color", Color(0.50, 0.68, 0.88))
+	local_room_layer.add_child(hint)
+
+	var card_w := 440.0
+	var card_h := 590.0
+	var card_gap := 20.0
+	var total_w := card_w * 4.0 + card_gap * 3.0
+	var cx := screen_size.x * 0.5 - total_w * 0.5
+	var cy := 148.0
+
+	for i in range(4):
+		_lr_slots[i]["is_online"] = false
+		var ui := _lr_build_card(i, Vector2(cx + i * (card_w + card_gap), cy), Vector2(card_w, card_h))
+		_lr_card_ui.append(ui)
+		_lr_refresh_slot(i)
+
+	_lr_build_online_panel(cx, cy + card_h + 12.0, total_w)
+
+	var btn_y := cy + card_h + 182.0
+	var back_btn := _lr_make_btn("← BACK", Vector2(screen_size.x * 0.5 - 420.0, btn_y), Vector2(280.0, 66.0), Color(0.55, 0.55, 0.55))
+	back_btn.pressed.connect(_lr_close)
+	local_room_layer.add_child(back_btn)
+
+	_lr_start_btn = _lr_make_btn("▶ START GAME", Vector2(screen_size.x * 0.5 + 140.0, btn_y), Vector2(340.0, 66.0), Color(0.24, 1.0, 0.86))
+	_lr_start_btn.pressed.connect(_lr_start_game)
+	local_room_layer.add_child(_lr_start_btn)
+
+
+func _lr_build_card(idx: int, pos: Vector2, sz: Vector2) -> Dictionary:
+	var col: Color = _LR_P_COLORS[idx]
+
+	var panel := ColorRect.new()
+	panel.position = pos
+	panel.size = sz
+	panel.color = Color(0.016, 0.032, 0.08, 0.93)
+	local_room_layer.add_child(panel)
+
+	var top_bar := ColorRect.new()
+	top_bar.position = pos
+	top_bar.size = Vector2(sz.x, 4.0)
+	top_bar.color = col
+	local_room_layer.add_child(top_bar)
+
+	var header := Label.new()
+	header.text = "P%d%s" % [idx + 1, "  HOST" if idx == 0 else ""]
+	header.position = pos + Vector2(0.0, 12.0)
+	header.size = Vector2(sz.x, 50.0)
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.add_theme_font_size_override("font_size", 34)
+	header.add_theme_color_override("font_color", col)
+	local_room_layer.add_child(header)
+
+	var ship_img := TextureRect.new()
+	ship_img.position = pos + Vector2(sz.x * 0.5 - 80.0, 72.0)
+	ship_img.size = Vector2(160.0, 160.0)
+	ship_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ship_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	local_room_layer.add_child(ship_img)
+
+	var ship_name := Label.new()
+	ship_name.position = pos + Vector2(0.0, 242.0)
+	ship_name.size = Vector2(sz.x, 42.0)
+	ship_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ship_name.add_theme_font_size_override("font_size", 28)
+	ship_name.add_theme_color_override("font_color", Color(0.92, 0.96, 1.0))
+	local_room_layer.add_child(ship_name)
+
+	var type_lbl := Label.new()
+	type_lbl.position = pos + Vector2(0.0, 288.0)
+	type_lbl.size = Vector2(sz.x, 38.0)
+	type_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	type_lbl.add_theme_font_size_override("font_size", 24)
+	local_room_layer.add_child(type_lbl)
+
+	var prev_btn := _lr_small_btn("◄", pos + Vector2(12.0, 136.0))
+	prev_btn.pressed.connect(_lr_prev_ship.bind(idx))
+	local_room_layer.add_child(prev_btn)
+
+	var next_btn := _lr_small_btn("►", pos + Vector2(sz.x - 62.0, 136.0))
+	next_btn.pressed.connect(_lr_next_ship.bind(idx))
+	local_room_layer.add_child(next_btn)
+
+	var toggle_btn := _lr_make_btn("→ CPU", pos + Vector2(sz.x * 0.5 - 120.0, 336.0), Vector2(240.0, 50.0), col)
+	toggle_btn.pressed.connect(_lr_toggle_type.bind(idx))
+	local_room_layer.add_child(toggle_btn)
+
+	var remove_btn := _lr_make_btn("REMOVE", pos + Vector2(sz.x * 0.5 - 90.0, 398.0), Vector2(180.0, 44.0), Color(0.8, 0.25, 0.25))
+	remove_btn.pressed.connect(_lr_remove.bind(idx))
+	local_room_layer.add_child(remove_btn)
+
+	var add_human_btn := _lr_make_btn("+ HUMAN", pos + Vector2(sz.x * 0.5 - 120.0, 280.0), Vector2(240.0, 58.0), col)
+	add_human_btn.pressed.connect(_lr_add_human.bind(idx))
+	local_room_layer.add_child(add_human_btn)
+
+	var add_cpu_btn := _lr_make_btn("+ CPU", pos + Vector2(sz.x * 0.5 - 120.0, 354.0), Vector2(240.0, 58.0), Color(0.55, 0.55, 0.6))
+	add_cpu_btn.pressed.connect(_lr_add_cpu.bind(idx))
+	local_room_layer.add_child(add_cpu_btn)
+
+	var empty_lbl := Label.new()
+	empty_lbl.text = "EMPTY"
+	empty_lbl.position = pos + Vector2(0.0, 216.0)
+	empty_lbl.size = Vector2(sz.x, 50.0)
+	empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	empty_lbl.add_theme_font_size_override("font_size", 30)
+	empty_lbl.add_theme_color_override("font_color", Color(0.35, 0.40, 0.50))
+	local_room_layer.add_child(empty_lbl)
+
+	return {
+		"ship_img": ship_img, "ship_name": ship_name, "type_lbl": type_lbl,
+		"prev_btn": prev_btn, "next_btn": next_btn,
+		"toggle_btn": toggle_btn, "remove_btn": remove_btn,
+		"add_human_btn": add_human_btn, "add_cpu_btn": add_cpu_btn,
+		"empty_lbl": empty_lbl,
+	}
+
+
+func _lr_refresh_slot(idx: int) -> void:
+	if idx >= _lr_card_ui.size() or idx >= _lr_slots.size():
+		return
+	var ui: Dictionary = _lr_card_ui[idx]
+	var slot: Dictionary = _lr_slots[idx]
+	var active: bool = bool(slot.get("active", false))
+	var is_cpu: bool = bool(slot.get("is_cpu", false))
+	var ship_idx: int = int(slot.get("ship_idx", idx))
+	var col: Color = _LR_P_COLORS[idx]
+
+	var is_online: bool = bool(slot.get("is_online", false))
+	(ui["ship_img"] as TextureRect).visible = active
+	(ui["ship_name"] as Label).visible = active
+	(ui["type_lbl"] as Label).visible = active
+	(ui["prev_btn"] as Button).visible = active and not is_online
+	(ui["next_btn"] as Button).visible = active and not is_online
+	(ui["toggle_btn"] as Button).visible = active and not is_online
+	(ui["remove_btn"] as Button).visible = active and idx > 0 and not is_online
+	(ui["add_human_btn"] as Button).visible = not active
+	(ui["add_cpu_btn"] as Button).visible = not active
+	(ui["empty_lbl"] as Label).visible = not active
+
+	if active:
+		var key: String = _LR_SHIP_KEYS[ship_idx]
+		if AssetPaths.PLAYERS.has(key):
+			var tpath: String = AssetPaths.PLAYERS[key]
+			if ResourceLoader.exists(tpath):
+				(ui["ship_img"] as TextureRect).texture = load(tpath) as Texture2D
+		(ui["ship_name"] as Label).text = _LR_SHIP_NAMES[ship_idx]
+		var tl: Label = ui["type_lbl"] as Label
+		var tb: Button = ui["toggle_btn"] as Button
+		if is_online:
+			tl.text = "[ ONLINE ]"
+			tl.add_theme_color_override("font_color", Color(0.35, 0.70, 1.0))
+		elif is_cpu:
+			tl.text = "[ CPU ]"
+			tl.add_theme_color_override("font_color", Color(0.65, 0.65, 0.70))
+			tb.text = "→ HUMAN"
+		else:
+			tl.text = "[ HUMAN ]"
+			tl.add_theme_color_override("font_color", col)
+			tb.text = "→ CPU"
+
+	if _lr_start_btn != null:
+		var any_active := false
+		for s in _lr_slots:
+			if bool(s.get("active", false)):
+				any_active = true
+				break
+		_lr_start_btn.disabled = not any_active
+
+
+func _lr_refresh_all() -> void:
+	for i in range(4):
+		_lr_refresh_slot(i)
+
+
+func _lr_add_human(idx: int) -> void:
+	_lr_slots[idx]["active"] = true
+	_lr_slots[idx]["is_cpu"] = false
+	_lr_refresh_slot(idx)
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_confirm", -6.0)
+
+
+func _lr_add_cpu(idx: int) -> void:
+	_lr_slots[idx]["active"] = true
+	_lr_slots[idx]["is_cpu"] = true
+	_lr_refresh_slot(idx)
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_confirm", -6.0)
+
+
+func _lr_remove(idx: int) -> void:
+	if idx == 0:
+		return
+	_lr_slots[idx]["active"] = false
+	_lr_refresh_slot(idx)
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_select", -8.0)
+
+
+func _lr_toggle_type(idx: int) -> void:
+	_lr_slots[idx]["is_cpu"] = not bool(_lr_slots[idx].get("is_cpu", false))
+	_lr_refresh_slot(idx)
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_select", -8.0)
+
+
+func _lr_prev_ship(idx: int) -> void:
+	var cur: int = int(_lr_slots[idx].get("ship_idx", idx))
+	_lr_slots[idx]["ship_idx"] = (cur - 1 + 4) % 4
+	_lr_refresh_slot(idx)
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_select", -8.0)
+
+
+func _lr_next_ship(idx: int) -> void:
+	var cur: int = int(_lr_slots[idx].get("ship_idx", idx))
+	_lr_slots[idx]["ship_idx"] = (cur + 1) % 4
+	_lr_refresh_slot(idx)
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_select", -8.0)
+
+
+func _lr_start_game() -> void:
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_confirm", -6.0)
+	if _lr_has_online_players:
+		if network_client != null and network_client.is_connected_to_server():
+			network_client.start_game("story")
+		return
+	_lr_do_local_start()
+
+
+func _lr_do_local_start() -> void:
+	var active_count := 0
+	for i in range(4):
+		if bool(_lr_slots[i].get("active", false)):
+			active_count += 1
+	player_count = clampi(active_count, 1, 4)
+	solo_mode = (player_count == 1)
+	var ji := 0
+	for i in range(4):
+		var s: Dictionary = _lr_slots[i]
+		if not bool(s.get("active", false)):
+			continue
+		var si: int = int(s.get("ship_idx", i))
+		if ji < player_ship_map.size():
+			player_ship_map[ji] = si + 1
+		if ji < player_cpu_map.size():
+			player_cpu_map[ji] = bool(s.get("is_cpu", false))
+		if ji < player_name_map.size():
+			player_name_map[ji] = _LR_SHIP_NAMES[si]
+		ji += 1
+	_lr_came_from_local_room = true
+	local_room_layer.visible = false
+	_show_stage_select()
+
+
+func _lr_close() -> void:
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_select", -8.0)
+	local_room_layer.visible = false
+	if story_mode_select_layer != null:
+		story_mode_select_layer.visible = true
+	else:
+		title_layer.visible = true
+
+
+func _lr_open() -> void:
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_select", -8.0)
+	_lr_has_online_players = false
+	for i in range(1, 4):
+		_lr_slots[i]["active"] = false
+		_lr_slots[i]["is_online"] = false
+	_lr_refresh_all()
+	_lr_update_online_ui()
+	local_room_layer.visible = true
+
+
+func _lr_make_btn(lbl: String, pos: Vector2, sz: Vector2, accent: Color) -> Button:
+	var btn := Button.new()
+	btn.text = lbl
+	btn.position = pos
+	btn.size = sz
+	btn.add_theme_font_size_override("font_size", 26)
+	var n := StyleBoxFlat.new()
+	n.bg_color = Color(accent.r * 0.12, accent.g * 0.12, accent.b * 0.12, 0.92)
+	n.border_color = Color(accent.r * 0.65, accent.g * 0.65, accent.b * 0.65, 0.8)
+	n.set_border_width_all(2)
+	n.set_corner_radius_all(12)
+	btn.add_theme_stylebox_override("normal", n)
+	var h := StyleBoxFlat.new()
+	h.bg_color = Color(accent.r * 0.28, accent.g * 0.28, accent.b * 0.28, 0.98)
+	h.border_color = accent
+	h.set_border_width_all(3)
+	h.set_corner_radius_all(12)
+	btn.add_theme_stylebox_override("hover", h)
+	btn.add_theme_color_override("font_color", Color(0.94, 0.98, 1.0))
+	btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 0.85))
+	return btn
+
+
+func _lr_small_btn(lbl: String, pos: Vector2) -> Button:
+	var btn := Button.new()
+	btn.text = lbl
+	btn.position = pos
+	btn.size = Vector2(50.0, 50.0)
+	btn.add_theme_font_size_override("font_size", 20)
+	var n := StyleBoxFlat.new()
+	n.bg_color = Color(0.08, 0.10, 0.20, 0.85)
+	n.border_color = Color(0.38, 0.55, 0.78, 0.7)
+	n.set_border_width_all(1)
+	n.set_corner_radius_all(8)
+	btn.add_theme_stylebox_override("normal", n)
+	var h := StyleBoxFlat.new()
+	h.bg_color = Color(0.20, 0.30, 0.50, 0.95)
+	h.border_color = Color.WHITE
+	h.set_border_width_all(2)
+	h.set_corner_radius_all(8)
+	btn.add_theme_stylebox_override("hover", h)
+	btn.add_theme_color_override("font_color", Color(0.92, 0.96, 1.0))
+	return btn
+
+
+func _lr_build_online_panel(px: float, py: float, pw: float) -> void:
+	var ph := 158.0
+	var bg := ColorRect.new()
+	bg.position = Vector2(px, py)
+	bg.size = Vector2(pw, ph)
+	bg.color = Color(0.006, 0.016, 0.048, 0.92)
+	local_room_layer.add_child(bg)
+
+	var top_line := ColorRect.new()
+	top_line.position = Vector2(px, py)
+	top_line.size = Vector2(pw, 2.0)
+	top_line.color = Color(0.24, 0.60, 1.0, 0.45)
+	local_room_layer.add_child(top_line)
+
+	var sec_ttl := Label.new()
+	sec_ttl.text = "─── ONLINE ROOM ───"
+	sec_ttl.position = Vector2(px, py + 8.0)
+	sec_ttl.size = Vector2(pw, 30.0)
+	sec_ttl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sec_ttl.add_theme_font_size_override("font_size", 20)
+	sec_ttl.add_theme_color_override("font_color", Color(0.30, 0.62, 1.0, 0.75))
+	local_room_layer.add_child(sec_ttl)
+
+	# Left: connect
+	_lr_connect_btn = _lr_make_btn("CONNECT TO SERVER", Vector2(px + 24.0, py + 46.0), Vector2(310.0, 50.0), Color(0.35, 0.70, 1.0))
+	_lr_connect_btn.pressed.connect(_lr_connect_to_server)
+	local_room_layer.add_child(_lr_connect_btn)
+
+	_lr_online_status_lbl = Label.new()
+	_lr_online_status_lbl.text = "Status: Offline"
+	_lr_online_status_lbl.position = Vector2(px + 24.0, py + 108.0)
+	_lr_online_status_lbl.size = Vector2(310.0, 36.0)
+	_lr_online_status_lbl.add_theme_font_size_override("font_size", 22)
+	_lr_online_status_lbl.add_theme_color_override("font_color", Color(0.55, 0.58, 0.65))
+	local_room_layer.add_child(_lr_online_status_lbl)
+
+	# Center: room code + create
+	var code_x := px + pw * 0.5 - 220.0
+	_lr_room_code_lbl = Label.new()
+	_lr_room_code_lbl.text = "ROOM CODE:  ----"
+	_lr_room_code_lbl.position = Vector2(code_x, py + 44.0)
+	_lr_room_code_lbl.size = Vector2(440.0, 52.0)
+	_lr_room_code_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lr_room_code_lbl.add_theme_font_size_override("font_size", 34)
+	_lr_room_code_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.22))
+	local_room_layer.add_child(_lr_room_code_lbl)
+
+	_lr_create_room_btn = _lr_make_btn("CREATE ROOM", Vector2(code_x + 90.0, py + 106.0), Vector2(260.0, 42.0), Color(0.24, 1.0, 0.86))
+	_lr_create_room_btn.pressed.connect(_lr_create_room_online)
+	_lr_create_room_btn.disabled = true
+	local_room_layer.add_child(_lr_create_room_btn)
+
+	# Right: info
+	var info_x := px + pw - 420.0
+	var info := Label.new()
+	info.text = "Share this code with friends!\nThey join via: Title → ONLINE LOBBY"
+	info.position = Vector2(info_x, py + 42.0)
+	info.size = Vector2(396.0, 110.0)
+	info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	info.add_theme_font_size_override("font_size", 22)
+	info.add_theme_color_override("font_color", Color(0.50, 0.62, 0.82))
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD
+	local_room_layer.add_child(info)
+
+
+func _lr_update_online_ui() -> void:
+	if _lr_online_status_lbl == null:
+		return
+	var status := network_last_status
+	var col := Color(0.55, 0.58, 0.65)
+	match status:
+		"connected":
+			col = Color(0.24, 1.0, 0.50)
+		"connecting":
+			col = Color(1.0, 0.85, 0.22)
+		"closed", "disconnected", "connect_failed":
+			col = Color(0.80, 0.35, 0.35)
+	_lr_online_status_lbl.text = "Status: " + status
+	_lr_online_status_lbl.add_theme_color_override("font_color", col)
+	if _lr_room_code_lbl != null:
+		var code := network_join_room_code
+		_lr_room_code_lbl.text = "ROOM CODE:  " + (code if code != "" else "----")
+	if _lr_create_room_btn != null:
+		_lr_create_room_btn.disabled = (network_client == null or not network_client.is_connected_to_server())
+	if _lr_connect_btn != null:
+		_lr_connect_btn.disabled = (network_client != null and network_client.is_connected_to_server())
+
+
+func _lr_connect_to_server() -> void:
+	if network_client == null:
+		_setup_network_client()
+	if network_client != null:
+		network_client.connect_to_server(network_server_url)
+		if _lr_online_status_lbl != null:
+			_lr_online_status_lbl.text = "Status: connecting..."
+
+
+func _lr_create_room_online() -> void:
+	if network_client == null or not network_client.is_connected_to_server():
+		return
+	network_client.set_player_name(online_player_name)
+	network_client.create_room("story")
+	if _lr_room_code_lbl != null:
+		_lr_room_code_lbl.text = "ROOM CODE:  ..."
+
+
+func _lr_mark_online_slot(player_id: int) -> void:
+	var idx := player_id - 1
+	if idx <= 0 or idx >= _lr_slots.size():
+		return
+	_lr_slots[idx]["active"] = true
+	_lr_slots[idx]["is_cpu"] = false
+	_lr_slots[idx]["is_online"] = true
+	_lr_refresh_slot(idx)
+	_lr_has_online_players = true
+	if _lr_online_status_lbl != null:
+		_lr_online_status_lbl.text = "P%d connected!" % player_id
+		_lr_online_status_lbl.add_theme_color_override("font_color", Color(0.24, 1.0, 0.50))
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_confirm", -6.0)
+
+
+func _lr_clear_online_slot(player_id: int) -> void:
+	var idx := player_id - 1
+	if idx <= 0 or idx >= _lr_slots.size():
+		return
+	_lr_slots[idx]["active"] = false
+	_lr_slots[idx]["is_online"] = false
+	_lr_refresh_slot(idx)
+	_lr_has_online_players = false
+	for s in _lr_slots:
+		if bool(s.get("is_online", false)) and bool(s.get("active", false)):
+			_lr_has_online_players = true
+			break
