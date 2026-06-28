@@ -1,0 +1,52 @@
+name: "Export and Deploy to GitHub Pages"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export-and-deploy:
+    name: Web Export → GitHub Pages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot 4.6.2
+        run: |
+          GODOT_VERSION="4.6.2"
+          TAG="${GODOT_VERSION}-stable"
+          TEMPLATE_FOLDER="${GODOT_VERSION}.stable"
+
+          wget -q \
+            "https://github.com/godotengine/godot/releases/download/${TAG}/Godot_v${TAG}_linux.x86_64.zip" \
+            -O godot.zip
+          unzip -q godot.zip
+          sudo mv "Godot_v${TAG}_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+
+          wget -q \
+            "https://github.com/godotengine/godot/releases/download/${TAG}/Godot_v${TAG}_export_templates.tpz" \
+            -O templates.tpz
+          mkdir -p "${HOME}/.local/share/godot/export_templates/${TEMPLATE_FOLDER}"
+          unzip -q templates.tpz -d /tmp/godot_templates
+          mv /tmp/godot_templates/templates/* \
+            "${HOME}/.local/share/godot/export_templates/${TEMPLATE_FOLDER}/"
+
+      - name: Export for Web
+        run: |
+          mkdir -p build
+          godot --headless --export-release "Web" build/index.html 2>&1
+          touch build/.nojekyll
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build
+          force_orphan: true

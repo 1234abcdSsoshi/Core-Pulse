@@ -69,6 +69,10 @@ func get_player_input(player_id: int) -> PlayerInputState:
 	# Classic local mode keeps the current same-PC operation unchanged.
 	if player_id == 1:
 		return local_provider.get_input_state(LocalInputProvider.InputProfile.CLASSIC_P1)
+	if player_id == 3:
+		return local_provider.get_input_state(LocalInputProvider.InputProfile.CLASSIC_P3)
+	if player_id >= 4:
+		return PlayerInputState.new()  # P4+: gamepad/online (placeholder)
 	return local_provider.get_input_state(LocalInputProvider.InputProfile.CLASSIC_P2)
 
 

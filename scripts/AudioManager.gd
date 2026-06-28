@@ -24,6 +24,10 @@ var shield_loop_player: AudioStreamPlayer
 var current_bgm_key: String = ""
 var shield_loop_enabled: bool = false
 
+var bgm_base_volume_db: float = -8.0   # base dB passed to play_bgm()
+var bgm_volume_offset: float = 0.0    # settings offset (0 = unchanged)
+var sfx_volume_offset: float = 0.0    # settings offset (0 = unchanged)
+
 
 func _ready() -> void:
 	_ensure_players()
@@ -66,9 +70,10 @@ func play_bgm(key: String, volume_db: float = -8.0) -> void:
 		return
 
 	current_bgm_key = key
+	bgm_base_volume_db = volume_db
 	bgm_player.stop()
 	bgm_player.stream = load(path)
-	bgm_player.volume_db = volume_db
+	bgm_player.volume_db = volume_db + bgm_volume_offset
 	bgm_player.play()
 
 
@@ -111,7 +116,7 @@ func play_sfx(key: String, volume_db: float = -4.0, pitch_scale: float = 1.0) ->
 	var player := AudioStreamPlayer.new()
 	player.bus = "Master"
 	player.stream = load(path)
-	player.volume_db = volume_db
+	player.volume_db = volume_db + sfx_volume_offset
 	player.pitch_scale = pitch_scale
 	add_child(player)
 	player.play()
@@ -144,6 +149,16 @@ func stop_shield_loop() -> void:
 
 	if shield_loop_player.playing:
 		shield_loop_player.stop()
+
+
+func set_bgm_volume_offset(offset_db: float) -> void:
+	bgm_volume_offset = offset_db
+	if bgm_player != null and bgm_player.playing:
+		bgm_player.volume_db = bgm_base_volume_db + bgm_volume_offset
+
+
+func set_sfx_volume_offset(offset_db: float) -> void:
+	sfx_volume_offset = offset_db
 
 
 func _on_shield_loop_finished() -> void:

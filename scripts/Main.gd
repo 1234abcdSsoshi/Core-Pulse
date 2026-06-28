@@ -26,6 +26,15 @@ const GATE_HP_MAX_S2         :=  800   # ステージ2 敵ゲートの最大体�
 const GATE_HP_MAX_S3         :=  600   # ステージ3 敵ゲートの最大体力（×3基）
 const GATE_HP_MAX_S4         := 3000   # ステージ4 ボスゲートの最大体力
 const GATE_BOSS_SHOOT_INTERVAL := 2.5  # ボスゲートの射撃間隔（秒）
+
+# ── シングルモード 機種ステータス ──────────────────────────────────────────────
+# キャラクター選択画面のバー表示値。0.0〜1.0（1.0 = そのカテゴリ最高値）
+# 左から順に [SPEED, POWER, FIRE RATE] の相対値。
+#                               SPEED  POWER  FIRE RATE
+const SHIP_STATS_AZURE_WING    := [0.79, 0.47, 0.82]  # Azure Wing    バランス型
+const SHIP_STATS_SOLAR_FANG    := [0.54, 0.82, 0.55]  # Solar Fang    重火力型
+const SHIP_STATS_EMERALD_CLAW  := [1.00, 0.35, 1.00]  # Emerald Claw  高速型
+const SHIP_STATS_VIOLET_PHANTOM := [0.67, 1.00, 0.40] # Violet Phantom 超火力型
 # ─────────────────────────────────────────────────────────────────────────────
 
 var mode: GameMode = GameMode.TITLE
@@ -42,6 +51,16 @@ var current_stage: StageBase = null
 var screen_size := Vector2(1920, 1080)
 var rng := RandomNumberGenerator.new()
 var audio_manager: Node
+
+# Settings panel
+var settings_layer: CanvasLayer
+var _settings_open: bool = false
+var _settings_was_paused: bool = false
+var _settings_bgm_slider: HSlider
+var _settings_sfx_slider: HSlider
+var _settings_fs_btn: Button
+var _settings_bgm_val_lbl: Label
+var _settings_sfx_val_lbl: Label
 
 # Online input abstraction Step 1-3.
 # The game asks input_router for P1/P2 input instead of reading all keys directly.
@@ -126,17 +145,29 @@ var _entity_id_counter: int = 0
 
 const PLAYER_LIVES_MAX := 5
 const PLAYER_INV_DURATION := 1.5
-var player_lives: Array[int] = [5, 5]
-var player_inv_timer: Array[float] = [0.0, 0.0]
+var player_lives: Array[int] = [5, 5, 5, 5]
+var player_inv_timer: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var player_count: int = 2  # 1=single, 2=co-op double, 4=co-op quad
 
 const STORY_INTRO_DURATION := 1.8
+const STORY_CORE_FADE_DURATION := 0.55
 var story_intro_active := false
 var story_intro_timer := 0.0
+var story_core_fade_timer := 0.0
 
 # Solo / co-op mode selection
 var solo_mode: bool = false
-var player_ship_map: Array = [1, 2]   # [P1 ship_id, P2 ship_id] (1=Azure Wing, 2=Solar Fang)
-var player_name_map: Array = ["PLAYER 1", "PLAYER 2"]
+var rhythm_bpm := 120.0          # beats per minute (solo mode)
+var rhythm_beat_timer := 0.0     # seconds until next beat
+var rhythm_beat_count := 0       # total beats elapsed this run
+var rhythm_flash_timer := 0.0    # gate visual flash after beat
+var player_ship_map: Array = [1, 2, 3, 4]   # ship_id per player slot
+var player_name_map: Array = ["PLAYER 1", "PLAYER 2", "PLAYER 3", "PLAYER 4"]
+var player_cpu_map: Array = [false, false, false, false]  # true = CPU AI per slot
+
+# ── CPU Utility AI ────────────────────────────────────────────────────────────
+var cpu_difficulty: int = 1  # 0=Easy  1=Normal  2=Hard  3=Expert
+var cpu_state: Array = ["ATTACK", "ATTACK", "ATTACK", "ATTACK"]
 
 # Story mode select screen
 var story_mode_select_layer: CanvasLayer
@@ -147,22 +178,39 @@ var char_select_mode: String = ""
 var _cs_configs: Array = [
 	{"name": "PLAYER 1", "ship_id": 1, "ready": false, "joined": true},
 	{"name": "PLAYER 2", "ship_id": 2, "ready": false, "joined": false},
+	{"name": "PLAYER 3", "ship_id": 3, "ready": false, "joined": false},
+	{"name": "PLAYER 4", "ship_id": 4, "ready": false, "joined": false},
 ]
 var _cs_panels: Array = []
-var _cs_ship_btns: Array = []
+var _cs_ship_btns: Array = []      # kept for size parity (unused)
 var _cs_ship_imgs: Array = []
 var _cs_name_edits: Array = []
 var _cs_status_lbls: Array = []
 var _cs_ready_btns: Array = []
+var _cs_active_btns: Array = []    # enable-toggle Button per slot
+var _cs_ship_opts: Array = []      # OptionButton dropdown per slot
+var _cs_ctrl_btns: Array = []      # [[PLAYER_btn, CPU_btn]] per slot
+var _cs_diff_btns: Array = []      # [EASY, NORMAL, HARD, EXPERT] buttons
 var _cs_start_btn: Button
 var _cs_room_area: Control
 var _cs_room_lbl: Label
 var _cs_join_edit: LineEdit
+# Solo mode carousel
+var _solo_carousel: Control = null
+var _solo_cs_idx: int = 0
+var _solo_preview_img: TextureRect = null
+var _solo_name_lbl: Label = null
+var _solo_desc_lbl: Label = null
+var _solo_dots: Array = []
+var _solo_stat_bars: Array = []
+var _solo_drag_start_x: float = -1.0
 
 var enemy_spawn_timer := 1.2
 var item_spawn_timer := 5.0
 var shoot_cd_p1 := 0.0
 var shoot_cd_p2 := 0.0
+var shoot_cd_p3 := 0.0
+var shoot_cd_p4 := 0.0
 
 # Player individuality settings for Story Mode.
 # P1 = Azure Wing: fast, precise, rapid-fire.
@@ -186,6 +234,26 @@ var player_specs := {
 		"rapid_interval": 0.22,
 		"damage": 26,
 		"bullet_size": 48.0,
+		"power_mode": "giant_bullet"
+	},
+	3: {
+		"name": "Emerald Claw",
+		"speed": 480.0,
+		"shot_speed": 1100.0,
+		"shoot_interval": 0.18,
+		"rapid_interval": 0.09,
+		"damage": 12,
+		"bullet_size": 32.0,
+		"power_mode": "giant_bullet"
+	},
+	4: {
+		"name": "Violet Phantom",
+		"speed": 320.0,
+		"shot_speed": 780.0,
+		"shoot_interval": 0.55,
+		"rapid_interval": 0.28,
+		"damage": 34,
+		"bullet_size": 52.0,
 		"power_mode": "giant_bullet"
 	}
 }
@@ -272,6 +340,7 @@ var raid_weak_offsets: Array[Vector2] = [Vector2(-240, 70), Vector2(0, 92), Vect
 # Visual nodes
 var bg_sprite: Sprite2D
 var base_sprite: Sprite2D
+var _base_sprite_natural_scale := Vector2.ONE
 var base_shield_sprite: Sprite2D
 var astral_ring_sprite: Sprite2D
 var arena_obstacle_sprites: Array[Sprite2D] = []
@@ -361,6 +430,13 @@ var story_p1_life_hi: Array = []
 var story_p2_life_segs: Array = []
 var story_p2_life_hi: Array = []
 var story_p2_hud_header: Label
+var story_p3_life_segs: Array = []
+var story_p3_life_hi: Array = []
+var story_p4_life_segs: Array = []
+var story_p4_life_hi: Array = []
+var story_p3_hud_header: Label
+var story_p4_hud_header: Label
+var story_p34_strip: ColorRect
 var story_gate_bar_bg: ColorRect
 var story_gate_bar_fill: ColorRect
 var story_gate_label: Label
@@ -399,6 +475,21 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
+			# Solo carousel keyboard navigation
+			if char_select_layer != null and char_select_layer.visible and char_select_mode == "single":
+				if key_event.keycode == KEY_LEFT:
+					_solo_cs_navigate(-1)
+					get_viewport().set_input_as_handled()
+					return
+				elif key_event.keycode == KEY_RIGHT:
+					_solo_cs_navigate(1)
+					get_viewport().set_input_as_handled()
+					return
+				elif key_event.keycode == KEY_ENTER or key_event.keycode == KEY_KP_ENTER:
+					_on_cs_start_game()
+					get_viewport().set_input_as_handled()
+					return
+
 			if key_event.keycode == KEY_TAB:
 				if mode == GameMode.STORY and not game_over:
 					if shop_active:
@@ -417,7 +508,11 @@ func _unhandled_input(event: InputEvent) -> void:
 					get_viewport().set_input_as_handled()
 				return
 
-			if key_event.keycode == KEY_F2:
+			if key_event.keycode == KEY_F4:
+				if _settings_open: _close_settings()
+				else: _open_settings()
+				get_viewport().set_input_as_handled()
+			elif key_event.keycode == KEY_F2:
 				debug_show_hitboxes = !debug_show_hitboxes
 				get_viewport().set_input_as_handled()
 			elif key_event.keycode == KEY_F6:
@@ -436,7 +531,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_toggle_network_connection()
 				get_viewport().set_input_as_handled()
 			elif key_event.keycode == KEY_F11:
-				_network_create_room()
+				_on_settings_fullscreen_toggled()
 				get_viewport().set_input_as_handled()
 			elif key_event.keycode == KEY_F12:
 				_network_join_room()
@@ -491,6 +586,8 @@ func _process(delta: float) -> void:
 
 	shoot_cd_p1 = maxf(0.0, shoot_cd_p1 - delta)
 	shoot_cd_p2 = maxf(0.0, shoot_cd_p2 - delta)
+	shoot_cd_p3 = maxf(0.0, shoot_cd_p3 - delta)
+	shoot_cd_p4 = maxf(0.0, shoot_cd_p4 - delta)
 
 	# Common update shared by all current stages.
 	# Later, these updates will move into StageBase or stage-specific files.
@@ -1011,8 +1108,9 @@ func _setup_world() -> void:
 	bg_sprite.position = screen_size * 0.5
 	add_child(bg_sprite)
 
-	base_sprite = AssetPaths.create_sprite(AssetPaths.STAGES["base_core"], Vector2(190, 190), Color(0.2, 0.9, 1.0), 0)
-	base_sprite.position = Vector2(screen_size.x * 0.5, screen_size.y - 130)
+	base_sprite = AssetPaths.create_sprite(AssetPaths.STAGES["base_core"], Vector2(260, 260), Color(0.2, 0.9, 1.0), 0)
+	base_sprite.position = Vector2(screen_size.x * 0.5, screen_size.y - 200)
+	_base_sprite_natural_scale = base_sprite.scale
 	add_child(base_sprite)
 
 	base_shield_sprite = AssetPaths.create_sprite(AssetPaths.EFFECTS["shield_bubble"], Vector2(260, 260), Color(0.5, 0.9, 1.0, 0.7), 2)
@@ -1058,7 +1156,10 @@ func _setup_world() -> void:
 		add_child(weak)
 		raid_weak_sprites.append(weak)
 
+	# Show all 4 ships on title screen; player_count is reset before each game
+	player_count = 4
 	_create_players()
+	player_count = 2  # restore default
 
 func _setup_ui() -> void:
 	ui_layer = CanvasLayer.new()
@@ -1112,22 +1213,23 @@ func _setup_ui() -> void:
 	back.color = Color(0, 0, 0, 0.82)
 	title_layer.add_child(back)
 
+	# CORE PULSE logo (replaces old text title)
+	var logo_sprite := AssetPaths.create_sprite(AssetPaths.UI["logo"], Vector2(860, 380), Color.WHITE, 1)
+	logo_sprite.position = Vector2(screen_size.x * 0.5, 270)
+	title_layer.add_child(logo_sprite)
+
+	# title_label kept for compatibility but not shown
 	title_label = Label.new()
-	title_label.text = "TWIN CORE BLASTERS"
-	title_label.position = Vector2(0, 210)
-	title_label.size = Vector2(screen_size.x, 96)
-	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.add_theme_font_size_override("font_size", 76)
-	title_label.add_theme_color_override("font_color", Color(0.2, 1.0, 0.85))
+	title_label.visible = false
 	title_layer.add_child(title_label)
 
 	title_options_label = Label.new()
-	title_options_label.text = "Choose a stage with mouse or keyboard\n1 Story   2 Astral Court   3 Eclipse Leviathan\nClick ONLINE LOBBY for browser co-op"
-	title_options_label.position = Vector2(0, 380)
-	title_options_label.size = Vector2(screen_size.x, 120)
+	title_options_label.text = "Keyboard: 1 Story  |  2 Astral Court  |  3 Eclipse Raid"
+	title_options_label.position = Vector2(0, 502)
+	title_options_label.size = Vector2(screen_size.x, 48)
 	title_options_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_options_label.add_theme_font_size_override("font_size", 34)
-	title_options_label.add_theme_color_override("font_color", Color(0.92, 0.96, 1.0))
+	title_options_label.add_theme_font_size_override("font_size", 24)
+	title_options_label.add_theme_color_override("font_color", Color(0.60, 0.75, 0.90))
 	title_layer.add_child(title_options_label)
 
 	_setup_title_buttons()
@@ -1172,6 +1274,7 @@ func _setup_ui() -> void:
 	_setup_fusion_flash()
 	_setup_shop_ui()
 	_setup_shop_hud_button()
+	_setup_settings_button()
 
 func _setup_pause_menu() -> void:
 	pause_layer = CanvasLayer.new()
@@ -1875,6 +1978,269 @@ func _build_shop_catalog() -> Dictionary:
 		},
 	}
 
+# ── Settings button & panel ──────────────────────────────────────────────────
+
+func _setup_settings_button() -> void:
+	# ── Gear button layer (always on top, always visible) ─────────────────
+	var btn_layer := CanvasLayer.new()
+	btn_layer.layer = 22
+	btn_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(btn_layer)
+
+	var btn_bg := ColorRect.new()
+	btn_bg.position = Vector2(screen_size.x - 54.0, screen_size.y - 54.0)
+	btn_bg.size = Vector2(46.0, 46.0)
+	btn_bg.color = Color(0.05, 0.08, 0.20, 0.88)
+	btn_bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	btn_layer.add_child(btn_bg)
+
+	var gear_lbl := Label.new()
+	gear_lbl.text = "⚙"
+	gear_lbl.position = Vector2(screen_size.x - 54.0, screen_size.y - 57.0)
+	gear_lbl.size = Vector2(46.0, 46.0)
+	gear_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	gear_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	gear_lbl.add_theme_font_size_override("font_size", 26)
+	gear_lbl.add_theme_color_override("font_color", Color(0.5, 0.75, 1.0))
+	btn_layer.add_child(gear_lbl)
+
+	var open_btn := Button.new()
+	open_btn.position = Vector2(screen_size.x - 56.0, screen_size.y - 56.0)
+	open_btn.size = Vector2(50.0, 50.0)
+	open_btn.flat = true
+	open_btn.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	open_btn.pressed.connect(_open_settings)
+	btn_layer.add_child(open_btn)
+
+	# ── Settings panel layer (above pause at 40) ──────────────────────────
+	settings_layer = CanvasLayer.new()
+	settings_layer.layer = 45
+	settings_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	settings_layer.visible = false
+	add_child(settings_layer)
+
+	# Full-screen dim overlay
+	var overlay := ColorRect.new()
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0.0, 0.0, 0.0, 0.70)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	settings_layer.add_child(overlay)
+
+	var pw := 480.0; var ph := 460.0
+	var px := (screen_size.x - pw) * 0.5
+	var py := (screen_size.y - ph) * 0.5
+
+	# Panel border (added first → renders behind panel)
+	var border := ColorRect.new()
+	border.position = Vector2(px - 1.0, py - 1.0)
+	border.size = Vector2(pw + 2.0, ph + 2.0)
+	border.color = Color(0.20, 0.45, 0.90, 0.55)
+	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	settings_layer.add_child(border)
+
+	# Panel background (added after border → renders on top)
+	var panel := ColorRect.new()
+	panel.position = Vector2(px, py)
+	panel.size = Vector2(pw, ph)
+	panel.color = Color(0.04, 0.07, 0.16, 0.97)
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	settings_layer.add_child(panel)
+
+	# Title
+	var title_lbl := Label.new()
+	title_lbl.text = "SETTINGS"
+	title_lbl.position = Vector2(px, py + 14.0)
+	title_lbl.size = Vector2(pw, 44.0)
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 28)
+	title_lbl.add_theme_color_override("font_color", Color(0.55, 0.85, 1.0))
+	settings_layer.add_child(title_lbl)
+
+	# Separator
+	var sep := ColorRect.new()
+	sep.position = Vector2(px + 28.0, py + 60.0)
+	sep.size = Vector2(pw - 56.0, 1.0)
+	sep.color = Color(0.2, 0.4, 0.7, 0.5)
+	settings_layer.add_child(sep)
+
+	var lbl_x  := px + 28.0
+	var ctrl_x := px + 170.0
+	var val_x  := px + pw - 58.0
+	var ctrl_w := pw - 170.0 - 66.0  # slider width
+
+	# ── BGM Volume row ────────────────────────────────────────────────────
+	var ry1 := py + 82.0
+	var bgm_lbl := Label.new()
+	bgm_lbl.text = "BGM音量"
+	bgm_lbl.position = Vector2(lbl_x, ry1 + 4.0)
+	bgm_lbl.size = Vector2(140.0, 32.0)
+	bgm_lbl.add_theme_font_size_override("font_size", 19)
+	bgm_lbl.add_theme_color_override("font_color", Color(0.75, 0.90, 1.0))
+	settings_layer.add_child(bgm_lbl)
+
+	_settings_bgm_slider = _make_settings_slider(ctrl_x, ry1 + 2.0, ctrl_w, 100.0)
+	settings_layer.add_child(_settings_bgm_slider)
+	_settings_bgm_slider.value_changed.connect(_on_settings_bgm_changed)
+
+	_settings_bgm_val_lbl = Label.new()
+	_settings_bgm_val_lbl.text = "100%"
+	_settings_bgm_val_lbl.position = Vector2(val_x, ry1 + 4.0)
+	_settings_bgm_val_lbl.size = Vector2(52.0, 32.0)
+	_settings_bgm_val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_settings_bgm_val_lbl.add_theme_font_size_override("font_size", 19)
+	_settings_bgm_val_lbl.add_theme_color_override("font_color", Color(0.85, 0.95, 1.0))
+	settings_layer.add_child(_settings_bgm_val_lbl)
+
+	# ── SE Volume row ─────────────────────────────────────────────────────
+	var ry2 := ry1 + 72.0
+	var sfx_lbl := Label.new()
+	sfx_lbl.text = "SE音量"
+	sfx_lbl.position = Vector2(lbl_x, ry2 + 4.0)
+	sfx_lbl.size = Vector2(140.0, 32.0)
+	sfx_lbl.add_theme_font_size_override("font_size", 19)
+	sfx_lbl.add_theme_color_override("font_color", Color(0.75, 0.90, 1.0))
+	settings_layer.add_child(sfx_lbl)
+
+	_settings_sfx_slider = _make_settings_slider(ctrl_x, ry2 + 2.0, ctrl_w, 100.0)
+	settings_layer.add_child(_settings_sfx_slider)
+	_settings_sfx_slider.value_changed.connect(_on_settings_sfx_changed)
+
+	_settings_sfx_val_lbl = Label.new()
+	_settings_sfx_val_lbl.text = "100%"
+	_settings_sfx_val_lbl.position = Vector2(val_x, ry2 + 4.0)
+	_settings_sfx_val_lbl.size = Vector2(52.0, 32.0)
+	_settings_sfx_val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_settings_sfx_val_lbl.add_theme_font_size_override("font_size", 19)
+	_settings_sfx_val_lbl.add_theme_color_override("font_color", Color(0.85, 0.95, 1.0))
+	settings_layer.add_child(_settings_sfx_val_lbl)
+
+	# ── テスト再生ボタン（BGM・SE それぞれ） ────────────────────────────
+	var ry_test := ry2 + 52.0
+	var test_hint := Label.new()
+	test_hint.text = "※ BGMはスライダー操作でリアルタイム反映されます"
+	test_hint.position = Vector2(lbl_x, ry_test)
+	test_hint.size = Vector2(pw - 56.0, 24.0)
+	test_hint.add_theme_font_size_override("font_size", 13)
+	test_hint.add_theme_color_override("font_color", Color(0.5, 0.65, 0.85))
+	settings_layer.add_child(test_hint)
+
+	var test_sfx_btn := Button.new()
+	test_sfx_btn.text = "▶  SE テスト再生"
+	test_sfx_btn.position = Vector2(px + (pw - 200.0) * 0.5, ry_test + 28.0)
+	test_sfx_btn.size = Vector2(200.0, 38.0)
+	test_sfx_btn.add_theme_font_size_override("font_size", 18)
+	test_sfx_btn.add_theme_color_override("font_color", Color(0.4, 1.0, 0.6))
+	test_sfx_btn.pressed.connect(_on_settings_test_sfx)
+	settings_layer.add_child(test_sfx_btn)
+
+	# ── Fullscreen row ────────────────────────────────────────────────────
+	var ry3 := ry_test + 80.0
+	var fs_lbl := Label.new()
+	fs_lbl.text = "フルスクリーン"
+	fs_lbl.position = Vector2(lbl_x, ry3 + 4.0)
+	fs_lbl.size = Vector2(140.0, 32.0)
+	fs_lbl.add_theme_font_size_override("font_size", 19)
+	fs_lbl.add_theme_color_override("font_color", Color(0.75, 0.90, 1.0))
+	settings_layer.add_child(fs_lbl)
+
+	_settings_fs_btn = Button.new()
+	_settings_fs_btn.text = "OFF"
+	_settings_fs_btn.position = Vector2(ctrl_x, ry3)
+	_settings_fs_btn.size = Vector2(120.0, 36.0)
+	_settings_fs_btn.add_theme_font_size_override("font_size", 19)
+	_settings_fs_btn.add_theme_color_override("font_color", Color(0.6, 0.9, 1.0))
+	_settings_fs_btn.pressed.connect(_on_settings_fullscreen_toggled)
+	settings_layer.add_child(_settings_fs_btn)
+
+	# ── Close button ──────────────────────────────────────────────────────
+	var close_btn := Button.new()
+	close_btn.text = "CLOSE"
+	close_btn.position = Vector2(px + (pw - 140.0) * 0.5, py + ph - 62.0)
+	close_btn.size = Vector2(140.0, 42.0)
+	close_btn.add_theme_font_size_override("font_size", 20)
+	close_btn.add_theme_color_override("font_color", Color(0.55, 0.85, 1.0))
+	close_btn.pressed.connect(_close_settings)
+	settings_layer.add_child(close_btn)
+
+
+func _make_settings_slider(sx: float, sy: float, sw: float, init_val: float) -> HSlider:
+	var sl := HSlider.new()
+	sl.min_value = 0.0
+	sl.max_value = 100.0
+	sl.step = 1.0
+	sl.value = init_val
+	sl.position = Vector2(sx, sy)
+	sl.size = Vector2(sw, 30.0)
+
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0.12, 0.20, 0.38)
+	track.set_corner_radius_all(4)
+	sl.add_theme_stylebox_override("slider", track)
+
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(0.25, 0.60, 1.0)
+	fill.set_corner_radius_all(4)
+	sl.add_theme_stylebox_override("grabber_area", fill)
+
+	var fill_hi := StyleBoxFlat.new()
+	fill_hi.bg_color = Color(0.35, 0.70, 1.0)
+	fill_hi.set_corner_radius_all(4)
+	sl.add_theme_stylebox_override("grabber_area_highlight", fill_hi)
+
+	return sl
+
+
+func _open_settings() -> void:
+	if _settings_open:
+		return
+	_settings_open = true
+	_settings_was_paused = paused
+	settings_layer.visible = true
+	var is_fs := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+	_settings_fs_btn.text = "ON" if is_fs else "OFF"
+	# Pause game logic but keep BGM playing so slider changes are heard immediately
+	if mode == GameMode.STORY and not game_over and not paused:
+		paused = true
+
+
+func _close_settings() -> void:
+	if not _settings_open:
+		return
+	_settings_open = false
+	settings_layer.visible = false
+	# Restore pause state to what it was before settings opened
+	if mode == GameMode.STORY and not game_over:
+		paused = _settings_was_paused
+
+
+func _on_settings_bgm_changed(value: float) -> void:
+	_settings_bgm_val_lbl.text = "%d%%" % int(value)
+	var offset_db := lerpf(-40.0, 0.0, value / 100.0)
+	audio_manager.set_bgm_volume_offset(offset_db)
+
+
+func _on_settings_sfx_changed(value: float) -> void:
+	_settings_sfx_val_lbl.text = "%d%%" % int(value)
+	var offset_db := lerpf(-40.0, 0.0, value / 100.0)
+	audio_manager.set_sfx_volume_offset(offset_db)
+
+
+func _on_settings_test_sfx() -> void:
+	# Play two distinct SFX back-to-back so the user can judge the SE volume clearly
+	audio_manager.play_sfx("ui_confirm")
+	audio_manager.play_sfx("item_pickup", -4.0, 1.0)
+
+
+func _on_settings_fullscreen_toggled() -> void:
+	var is_fs := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+	if is_fs:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		_settings_fs_btn.text = "OFF"
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		_settings_fs_btn.text = "ON"
+
+
 # ── Shop HUD button ──────────────────────────────────────────────────────────
 
 func _setup_shop_hud_button() -> void:
@@ -2082,7 +2448,7 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 	var _lbg1 := ColorRect.new()
 	_lbg1.position = Vector2(749, 21)
 	_lbg1.size = Vector2(_bar_total_w + 2.0, _SEG_H + 2.0)
-	_lbg1.color = Color(0.04, 0.06, 0.04)
+	_lbg1.color = Color(0.02, 0.04, 0.10)
 	_lbg1.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	story_hud_container.add_child(_lbg1)
 	for _si in range(PLAYER_LIVES_MAX):
@@ -2090,14 +2456,14 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 		var _fill := ColorRect.new()
 		_fill.position = Vector2(_sx, _SEG_Y)
 		_fill.size = Vector2(_SEG_W, _SEG_H)
-		_fill.color = Color(0.10, 0.90, 0.28)
+		_fill.color = Color(0.15, 0.55, 1.0)
 		_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		story_hud_container.add_child(_fill)
 		story_p1_life_segs.append(_fill)
 		var _hi := ColorRect.new()
 		_hi.position = Vector2(_sx, _SEG_Y)
 		_hi.size = Vector2(_SEG_W, 3.0)
-		_hi.color = Color(0.55, 1.0, 0.65, 0.60)
+		_hi.color = Color(0.55, 0.80, 1.0, 0.60)
 		_hi.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		story_hud_container.add_child(_hi)
 		story_p1_life_hi.append(_hi)
@@ -2223,6 +2589,71 @@ func _setup_story_hud_bar(hud_layer: CanvasLayer) -> void:
 	story_fusion_label.visible = false
 	story_fusion_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	story_link_container.add_child(story_fusion_label)
+
+	# ── P3/P4 second HUD strip (4-player mode only) ──────────────────────
+	story_p34_strip = ColorRect.new()
+	story_p34_strip.position = Vector2(0, BAR_H)
+	story_p34_strip.size = Vector2(sw, 38)
+	story_p34_strip.color = Color(0.03, 0.05, 0.12, 0.88)
+	story_p34_strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_p34_strip.visible = false
+	story_hud_container.add_child(story_p34_strip)
+
+	# P3/P4 use same segment dimensions as P1/P2 — label at +4, segments at +22 (mirrors P1/P2 layout)
+	const _S2Y := 22.0
+	var _p3_lbl_x := 750.0
+	story_p3_hud_header = Label.new()
+	story_p3_hud_header.text = "P3 HP"
+	story_p3_hud_header.position = Vector2(_p3_lbl_x, BAR_H + 4)
+	story_p3_hud_header.size = Vector2(140, 18)
+	story_p3_hud_header.add_theme_font_size_override("font_size", 12)
+	story_p3_hud_header.add_theme_color_override("font_color", Color(0.15, 1.00, 0.35))
+	story_p3_hud_header.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_hud_container.add_child(story_p3_hud_header)
+	var _lbg3 := ColorRect.new()
+	_lbg3.position = Vector2(_p3_lbl_x - 1.0, BAR_H + 21)
+	_lbg3.size = Vector2(_bar_total_w + 2.0, _SEG_H + 2.0)
+	_lbg3.color = Color(0.02, 0.08, 0.04)
+	_lbg3.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_hud_container.add_child(_lbg3)
+	story_p3_life_segs.clear(); story_p3_life_hi.clear()
+	for _si in range(PLAYER_LIVES_MAX):
+		var _sx := _p3_lbl_x + _si * (_SEG_W + _SEG_GAP)
+		var _f := ColorRect.new()
+		_f.position = Vector2(_sx, BAR_H + _S2Y); _f.size = Vector2(_SEG_W, _SEG_H)
+		_f.color = Color(0.15, 0.95, 0.30); _f.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		story_hud_container.add_child(_f); story_p3_life_segs.append(_f)
+		var _h := ColorRect.new()
+		_h.position = Vector2(_sx, BAR_H + _S2Y); _h.size = Vector2(_SEG_W, 3.0)
+		_h.color = Color(0.55, 1.0, 0.60, 0.60); _h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		story_hud_container.add_child(_h); story_p3_life_hi.append(_h)
+
+	var _p4_lbl_x := _p3_lbl_x + _bar_total_w + 22.0
+	story_p4_hud_header = Label.new()
+	story_p4_hud_header.text = "P4 HP"
+	story_p4_hud_header.position = Vector2(_p4_lbl_x, BAR_H + 4)
+	story_p4_hud_header.size = Vector2(140, 18)
+	story_p4_hud_header.add_theme_font_size_override("font_size", 12)
+	story_p4_hud_header.add_theme_color_override("font_color", Color(0.75, 0.25, 1.00))
+	story_p4_hud_header.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_hud_container.add_child(story_p4_hud_header)
+	var _lbg4 := ColorRect.new()
+	_lbg4.position = Vector2(_p4_lbl_x - 1.0, BAR_H + 21)
+	_lbg4.size = Vector2(_bar_total_w + 2.0, _SEG_H + 2.0)
+	_lbg4.color = Color(0.06, 0.02, 0.10)
+	_lbg4.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	story_hud_container.add_child(_lbg4)
+	story_p4_life_segs.clear(); story_p4_life_hi.clear()
+	for _si in range(PLAYER_LIVES_MAX):
+		var _sx := _p4_lbl_x + _si * (_SEG_W + _SEG_GAP)
+		var _f := ColorRect.new()
+		_f.position = Vector2(_sx, BAR_H + _S2Y); _f.size = Vector2(_SEG_W, _SEG_H)
+		_f.color = Color(0.70, 0.20, 1.0); _f.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		story_hud_container.add_child(_f); story_p4_life_segs.append(_f)
+		var _h := ColorRect.new()
+		_h.position = Vector2(_sx, BAR_H + _S2Y); _h.size = Vector2(_SEG_W, 3.0)
+		_h.color = Color(0.90, 0.60, 1.0, 0.60); _h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		story_hud_container.add_child(_h); story_p4_life_hi.append(_h)
 
 
 # ── Weapon fire helpers ───────────────────────────────────────────────────────
@@ -2928,20 +3359,24 @@ func _get_player_spec(player_id: int) -> Dictionary:
 
 func _create_players() -> void:
 	players.clear()
-	const _SHIP_PATHS: Array[String] = ["p1", "p2"]
-	const _SHIP_COLORS: Array[Color] = [Color(0.2, 0.85, 1.0), Color(1.0, 0.66, 0.18)]
-	const _INIT_POS_X: Array[float] = [0.35, 0.65]
-	for _pi in range(2):
-		var _sid: int = int(player_ship_map[_pi] if _pi < player_ship_map.size() else _pi + 1) - 1
-		var _path: String = AssetPaths.PLAYERS[_SHIP_PATHS[clampi(_sid, 0, 1)]]
-		var _col: Color = _SHIP_COLORS[clampi(_sid, 0, 1)]
+	const _SHIP_PATHS: Array[String] = ["p1", "p2", "p3", "p4"]
+	const _SHIP_COLORS: Array[Color] = [
+		Color(0.2, 0.85, 1.0), Color(1.0, 0.66, 0.18),
+		Color(0.15, 1.0, 0.35), Color(0.75, 0.25, 1.0)
+	]
+	const _INIT_POS_X: Array[float] = [0.25, 0.45, 0.55, 0.75]
+	for _pi in range(player_count):
+		var _ship_id: int = int(player_ship_map[_pi] if _pi < player_ship_map.size() else _pi + 1)
+		var _sid: int = clampi(_ship_id - 1, 0, _SHIP_PATHS.size() - 1)
+		var _path: String = AssetPaths.PLAYERS[_SHIP_PATHS[_sid]]
+		var _col: Color = _SHIP_COLORS[_sid]
 		players.append(_create_player(_pi + 1, _path, Vector2(screen_size.x * _INIT_POS_X[_pi], screen_size.y - 160), _col))
 
 func _create_player(id: int, path: String, pos: Vector2, color: Color) -> Dictionary:
 	var spec: Dictionary = _get_player_spec(id)
 
-	# P1 is smaller and agile. P2 is larger and heavier.
-	var sprite_size := Vector2(92, 92) if id == 1 else Vector2(112, 112)
+	# Size varies by player: P1 small/agile, P2 large/heavy, P3/P4 medium
+	var sprite_size := Vector2(92, 92) if id == 1 else (Vector2(112, 112) if id == 2 else Vector2(100, 100))
 	var sprite := AssetPaths.create_sprite(path, sprite_size, color, 10)
 	sprite.position = pos
 	add_child(sprite)
@@ -2965,7 +3400,7 @@ func _create_player(id: int, path: String, pos: Vector2, color: Color) -> Dictio
 		"damage": int(spec["damage"]),
 		"bullet_size": float(spec["bullet_size"]),
 		"power_mode": String(spec["power_mode"]),
-		"radius": 42.0 if id == 1 else 52.0,
+		"radius": 42.0 if id == 1 else (52.0 if id == 2 else 46.0),
 		"rapid": 0.0,
 		"power": 0.0,
 		"base_scale": sprite.scale,
@@ -2978,9 +3413,12 @@ func _start_story() -> void:
 	team_score = 0
 	p1_score = 0
 	p2_score = 0
-	base_hp = CORE_HP_MAX
+	base_hp = 9999999  # core has no HP; game ends only when all player lives reach 0
 	core_shield_time = 0.0
 	core_shield_max  = 0.0
+	rhythm_beat_timer = 60.0 / rhythm_bpm
+	rhythm_beat_count = 0
+	rhythm_flash_timer = 0.0
 	coop_link = 0.0
 	story_wave = 1
 	result_title = ""
@@ -2998,6 +3436,9 @@ func _start_story() -> void:
 	_clear_game_objects()
 	_set_background(AssetPaths.BACKGROUNDS["space"])
 	base_sprite.visible = true
+	base_sprite.scale   = Vector2.ZERO
+	base_sprite.modulate.a = 1.0
+	story_core_fade_timer = 0.0
 
 	astral_ring_sprite.visible = false
 	boss_sprite.visible = false
@@ -3006,45 +3447,70 @@ func _start_story() -> void:
 	link_back.visible = false
 	link_fill.visible = false
 
+	# Free old player sprites and recreate for current player_count
+	for _op in players:
+		if is_instance_valid(_op.get("sprite")):
+			(_op["sprite"] as Sprite2D).queue_free()
+		if is_instance_valid(_op.get("shield_sprite")):
+			(_op["shield_sprite"] as Sprite2D).queue_free()
+	_create_players()
 	_rebuild_player_ships()
 	var _intro_core_pos := base_sprite.position
 	for p in players:
 		var _pid := int(p["id"])
-		var _is_p2 := _pid == 2
 		p["pos"] = _intro_core_pos
 		p["hp"] = 100
 		p["rapid"] = 0.0
 		p["power"] = 0.0
 		p["speed"] = p["base_speed"]
 		var _ispr := p["sprite"] as Sprite2D
-		_ispr.visible = not (solo_mode and _is_p2)
+		_ispr.visible = true
 		_ispr.scale = Vector2.ZERO
 		_ispr.position = _intro_core_pos
 		(p["shield_sprite"] as Sprite2D).visible = false
 
 	story_intro_active = true
 	story_intro_timer = STORY_INTRO_DURATION
-	player_lives = [PLAYER_LIVES_MAX, PLAYER_LIVES_MAX]
-	player_inv_timer = [0.0, 0.0]
-	if solo_mode:
-		player_lives[1] = 0
+	player_lives = [PLAYER_LIVES_MAX, PLAYER_LIVES_MAX, PLAYER_LIVES_MAX, PLAYER_LIVES_MAX]
+	player_inv_timer = [0.0, 0.0, 0.0, 0.0]
+	# Zero out lives for inactive player slots
+	for _li in range(player_count, 4):
+		player_lives[_li] = 0
+	var _show_p2  := player_count >= 2
+	var _show_p3  := player_count >= 3
+	var _show_p4  := player_count >= 4
 	if story_p2_hud_header != null:
-		story_p2_hud_header.visible = not solo_mode
+		story_p2_hud_header.visible = _show_p2
 	for _si in story_p2_life_segs:
-		(_si as CanvasItem).visible = not solo_mode
+		(_si as CanvasItem).visible = _show_p2
 	for _hi in story_p2_life_hi:
-		(_hi as CanvasItem).visible = not solo_mode
+		(_hi as CanvasItem).visible = _show_p2
+	if story_p34_strip != null:
+		story_p34_strip.visible = _show_p3
+	if story_p3_hud_header != null:
+		story_p3_hud_header.visible = _show_p3
+	if story_p4_hud_header != null:
+		story_p4_hud_header.visible = _show_p4
+	for _si in story_p3_life_segs:
+		(_si as CanvasItem).visible = _show_p3
+	for _hi in story_p3_life_hi:
+		(_hi as CanvasItem).visible = _show_p3
+	for _si in story_p4_life_segs:
+		(_si as CanvasItem).visible = _show_p4
+	for _hi in story_p4_life_hi:
+		(_hi as CanvasItem).visible = _show_p4
 
 	# ── Restore carry-over from previous stage ────────────────────────
 	if not _stage_carry.is_empty():
 		# Crystals (reset by _clear_game_objects; restore here)
 		crystals = int(_stage_carry.get("crystals", 0))
 		_update_hud_crystal_label()
-		# Lives — ensure at least 1 for P1; P2 keeps 0 in solo mode
-		var _cl: Array = _stage_carry.get("lives", [PLAYER_LIVES_MAX, PLAYER_LIVES_MAX])
+		# Lives — restore per active player; inactive slots stay 0
+		var _cl: Array = _stage_carry.get("lives", [])
 		player_lives[0] = clampi(int(_cl[0]) if _cl.size() > 0 else PLAYER_LIVES_MAX, 1, PLAYER_LIVES_MAX)
-		if not solo_mode and _cl.size() > 1:
-			player_lives[1] = clampi(int(_cl[1]), 1, PLAYER_LIVES_MAX)
+		for _li in range(1, player_count):
+			if _li < _cl.size():
+				player_lives[_li] = clampi(int(_cl[_li]), 1, PLAYER_LIVES_MAX)
 		# Per-player active item timers
 		var _carry_rapid: Array = _stage_carry.get("rapid", [])
 		var _carry_power: Array = _stage_carry.get("power", [])
@@ -3311,16 +3777,150 @@ func _update_players(delta: float) -> void:
 		var power: float = float(p.get("power", 0.0))
 
 		var input_state := _get_player_input(player_id)
-		dir = input_state.move
+		var _interval := float(p["rapid_interval"]) if rapid > 0.0 else float(p["shoot_interval"])
+		var _is_cpu: bool = (player_id - 1) < player_cpu_map.size() and bool(player_cpu_map[player_id - 1])
 
-		if player_id == 1:
-			if input_state.shoot and shoot_cd_p1 <= 0.0:
-				_shoot(1)
-				shoot_cd_p1 = float(p["rapid_interval"]) if rapid > 0.0 else float(p["shoot_interval"])
+		if _is_cpu:
+			var _cpu_pos: Vector2 = p["pos"]
+			var _slot := player_id - 1
+
+			# ── Difficulty parameters ──────────────────────────────────────────
+			var _threat_r: float  # repulsion radius (px)
+			var _spd_mult: float
+			var _w_hp:     float
+			match cpu_difficulty:
+				0: _threat_r = 180.0; _spd_mult = 0.95; _w_hp = 0.0
+				1: _threat_r = 250.0; _spd_mult = 1.10; _w_hp = 0.4
+				2: _threat_r = 320.0; _spd_mult = 1.25; _w_hp = 0.9
+				_: _threat_r = 400.0; _spd_mult = 1.40; _w_hp = 1.5
+
+			# ── 2D Repulsion field (bullets above CPU → horizontal escape only) ──
+			var _repulsion := Vector2.ZERO
+			var _max_danger := 0.0
+			for _eb in enemy_bullets:
+				var _bpos: Vector2 = _eb["pos"]
+				if _bpos.y > _cpu_pos.y + 50.0:
+					continue  # already passed
+				var _dist: float = _cpu_pos.distance_to(_bpos)
+				if _dist >= _threat_r:
+					continue
+				var _t: float = 1.0 - (_dist / _threat_r)  # linear falloff
+				_max_danger = maxf(_max_danger, _t)
+				var _away: Vector2 = _cpu_pos - _bpos
+				if _away.y > 0.0:
+					# Bullet is above CPU: push horizontally (not downward — useless in vertical shooter)
+					var _hx: float = _away.x
+					if absf(_hx) < 2.0:
+						_hx = signf(_cpu_pos.x - screen_size.x * 0.5)
+						if absf(_hx) < 0.1: _hx = 1.0
+					_away = Vector2(_hx, 0.0)
+				_repulsion += _away.normalized() * _t
+
+			# Screen-edge repulsion: prevent wall hugging
+			var _em := 80.0
+			if _cpu_pos.x < _em:
+				_repulsion.x += (1.0 - _cpu_pos.x / _em) * 1.5
+			elif _cpu_pos.x > screen_size.x - _em:
+				_repulsion.x -= (1.0 - (screen_size.x - _cpu_pos.x) / _em) * 1.5
+			if _cpu_pos.y > screen_size.y - _em:
+				_repulsion.y -= (1.0 - (screen_size.y - _cpu_pos.y) / _em) * 1.5
+
+			# Symmetry fallback (bullets perfectly cancel out)
+			if _max_danger > 0.25 and _repulsion.length() < 0.1:
+				var _cx := screen_size.x * 0.5
+				_repulsion = Vector2(signf(_cpu_pos.x - _cx), -0.1).normalized()
+				if _repulsion.length() < 0.1: _repulsion = Vector2(1.0, 0.0)
+
+			# ── Navigation target: gate is always the primary objective ──────
+			# Find the current active gate position
+			var _gx := screen_size.x * 0.5
+			if gate_sprite != null and not gate_destroyed:         _gx = gate_sprite.position.x
+			elif gate2_sprite != null and not gate2_destroyed:     _gx = gate2_sprite.position.x
+			elif gate3_sprite != null and not gate3_destroyed:     _gx = gate3_sprite.position.x
+			# Position below the gate so shots (fired straight UP) hit it
+			var _gate_nav := Vector2(_gx, screen_size.y * 0.65)
+
+			# Opportunistic item collection: only in lower half, close, near gate X
+			var _item_target := Vector2.ZERO
+			if cpu_difficulty >= 1 and _cpu_pos.y > screen_size.y * 0.52:
+				for _it in items:
+					var _itp: Vector2 = _it["pos"]
+					var _itd: float = _cpu_pos.distance_to(_itp)
+					if _itd < 150.0 and absf(_itp.x - _gx) < 200.0 and _itp.y > screen_size.y * 0.52:
+						_item_target = _itp
+						break
+
+			# Upper-half guard: if CPU drifted above midpoint, force return to base
+			var _retreating: bool = _cpu_pos.y < screen_size.y * 0.50
+			var _nav := _gate_nav
+			if not _retreating and _item_target != Vector2.ZERO:
+				_nav = _item_target
+				cpu_state[_slot] = "COLLECT_ITEM"
+			elif _retreating:
+				cpu_state[_slot] = "RETREAT"
+			else:
+				cpu_state[_slot] = "ATTACK"
+
+			# ── Blend 2D repulsion with navigation ────────────────────────────
+			# When retreating: cap dodge weight at 0.55 so nav always pulls CPU downward.
+			# Horizontal repulsion still fires — CPU dodges sideways while descending.
+			var _dodge_w: float
+			if _retreating:
+				_dodge_w = minf(_max_danger * 2.5, 0.55)
+			else:
+				_dodge_w = minf(_max_danger * 2.5, 1.0)
+			var _nav_dir: Vector2 = (_nav - _cpu_pos).normalized() if _cpu_pos.distance_to(_nav) > 8.0 else Vector2.ZERO
+			var _rep_dir: Vector2 = _repulsion.normalized() if _repulsion.length() > 0.01 else Vector2.ZERO
+			var _combined: Vector2 = _rep_dir * _dodge_w + _nav_dir * (1.0 - _dodge_w)
+			dir = _combined.normalized() * _spd_mult if _combined.length() > 0.01 else Vector2.ZERO
+
+			if _max_danger > 0.0:
+				cpu_state[_slot] = "DODGE"
+
+			# ── Shoot only when aligned with a hittable target ────────────────
+			# Shots fire straight UP, so X-alignment with target is required.
+			# Tolerances are half the sprite widths for each target type.
+			var _should_shoot := false
+
+			# 1. Gate alignment (gate sprite ~200px wide → ±90px tolerance)
+			const _AIM_GATE := 90.0
+			if gate_sprite  != null and not gate_destroyed  and absf(_cpu_pos.x - gate_sprite.position.x)  < _AIM_GATE: _should_shoot = true
+			if gate2_sprite != null and not gate2_destroyed and absf(_cpu_pos.x - gate2_sprite.position.x) < _AIM_GATE: _should_shoot = true
+			if gate3_sprite != null and not gate3_destroyed and absf(_cpu_pos.x - gate3_sprite.position.x) < _AIM_GATE: _should_shoot = true
+
+			# 2. Enemy alignment (~±40px)
+			if not _should_shoot:
+				for _en in enemies:
+					if absf(_cpu_pos.x - (_en["pos"] as Vector2).x) < 40.0:
+						_should_shoot = true; break
+
+			# 3. Intercept incoming enemy bullets (~±28px)
+			if not _should_shoot:
+				for _eb in enemy_bullets:
+					var _ebpos: Vector2 = _eb["pos"]
+					if _ebpos.y < _cpu_pos.y + 20.0 and absf(_cpu_pos.x - _ebpos.x) < 28.0:
+						_should_shoot = true; break
+
+			if _should_shoot:
+				match player_id:
+					1: if shoot_cd_p1 <= 0.0: _shoot(1); shoot_cd_p1 = _interval
+					2: if shoot_cd_p2 <= 0.0: _shoot(2); shoot_cd_p2 = _interval
+					3: if shoot_cd_p3 <= 0.0: _shoot(3); shoot_cd_p3 = _interval
+					4: if shoot_cd_p4 <= 0.0: _shoot(4); shoot_cd_p4 = _interval
 		else:
-			if input_state.shoot and shoot_cd_p2 <= 0.0:
-				_shoot(2)
-				shoot_cd_p2 = float(p["rapid_interval"]) if rapid > 0.0 else float(p["shoot_interval"])
+			dir = input_state.move
+			if player_id == 1:
+				if input_state.shoot and shoot_cd_p1 <= 0.0:
+					_shoot(1); shoot_cd_p1 = _interval
+			elif player_id == 2:
+				if input_state.shoot and shoot_cd_p2 <= 0.0:
+					_shoot(2); shoot_cd_p2 = _interval
+			elif player_id == 3:
+				if input_state.shoot and shoot_cd_p3 <= 0.0:
+					_shoot(3); shoot_cd_p3 = _interval
+			elif player_id == 4:
+				if input_state.shoot and shoot_cd_p4 <= 0.0:
+					_shoot(4); shoot_cd_p4 = _interval
 
 		var pos: Vector2 = p["pos"]
 		pos += dir * float(p["speed"]) * delta
@@ -3353,7 +3953,13 @@ func _shoot(player_id: int) -> void:
 		direction = Vector2.RIGHT if player_id == 1 else Vector2.LEFT
 
 	var _shoot_sid := int(player_ship_map[player_id - 1]) if player_id - 1 < player_ship_map.size() else player_id
-	var path: String = AssetPaths.PROJECTILES["azure"] if _shoot_sid == 1 else AssetPaths.PROJECTILES["solar"]
+	var path: String
+	match _shoot_sid:
+		1: path = AssetPaths.PROJECTILES["azure"]
+		2: path = AssetPaths.PROJECTILES["solar"]
+		3: path = AssetPaths.PROJECTILES["emerald"]
+		4: path = AssetPaths.PROJECTILES["violet"]
+		_: path = AssetPaths.PROJECTILES["basic"]
 	var origin: Vector2 = p["pos"]
 	var damage: int = int(p["damage"])
 	var shot_speed: float = float(p["shot_speed"])
@@ -3381,7 +3987,12 @@ func _shoot(player_id: int) -> void:
 	_fire_weapon_extra(player_id, origin, direction * shot_speed)
 
 	if audio_manager != null:
-		audio_manager.play_sfx("shot_azure" if _shoot_sid == 1 else "shot_solar", -8.0)
+		var _sfx_key: String
+		match _shoot_sid:
+			1: _sfx_key = "shot_azure"
+			3: _sfx_key = "shot_azure"
+			_: _sfx_key = "shot_solar"
+		audio_manager.play_sfx(_sfx_key, -8.0)
 
 func _create_bullet(pos: Vector2, dir: Vector2, owner_id: int, damage: int, path: String, speed: float, size: float, piercing: bool = false) -> Dictionary:
 	var sprite := AssetPaths.create_sprite(path, Vector2(size, size), Color.WHITE, 20)
@@ -3531,29 +4142,72 @@ func _update_story(delta: float) -> void:
 	if story_intro_active:
 		story_intro_timer = maxf(0.0, story_intro_timer - delta)
 		var _prog := 1.0 - story_intro_timer / STORY_INTRO_DURATION
-		var _scale_t := smoothstep(0.0, 0.40, _prog)
-		var _move_t := smoothstep(0.0, 1.0, _prog)
-		var _core_p := base_sprite.position
-		var _targets: Array = [
-			Vector2(screen_size.x * 0.35, screen_size.y - 280),
-			Vector2(screen_size.x * 0.65, screen_size.y - 280)
-		]
-		var _anim_count := 1 if solo_mode else mini(players.size(), 2)
+
+		# ── Target positions by player count ──────────────────────────
+		var _dy := screen_size.y - 280.0
+		var _targets: Array
+		match player_count:
+			1: _targets = [
+				Vector2(screen_size.x * 0.50, _dy),
+			]
+			3: _targets = [
+				Vector2(screen_size.x * 0.25, _dy),
+				Vector2(screen_size.x * 0.50, _dy),
+				Vector2(screen_size.x * 0.75, _dy),
+			]
+			4: _targets = [
+				Vector2(screen_size.x * 0.20, _dy),
+				Vector2(screen_size.x * 0.40, _dy),
+				Vector2(screen_size.x * 0.60, _dy),
+				Vector2(screen_size.x * 0.80, _dy),
+			]
+			_: _targets = [
+				Vector2(screen_size.x * 0.30, _dy),
+				Vector2(screen_size.x * 0.70, _dy),
+			]
+
+		# ── Phase 1 (0 → 30%): core pulses in ─────────────────────────
+		var _core_scale := smoothstep(0.0, 0.30, _prog)
+		if base_sprite != null:
+			base_sprite.scale = _base_sprite_natural_scale * _core_scale
+
+		# ── Phase 2 (25% → 100%): players emerge from core ────────────
+		var _emerge := clampf((_prog - 0.25) / 0.75, 0.0, 1.0)
+		var _scale_t := smoothstep(0.0, 0.45, _emerge)
+		var _move_t  := smoothstep(0.0, 1.00, _emerge)
+		var _core_p  := base_sprite.position
+		var _anim_count := mini(players.size(), player_count)
 		for _pi in range(_anim_count):
+			if _pi >= _targets.size():
+				break
 			var _ip: Dictionary = players[_pi]
 			var _ispr := _ip["sprite"] as Sprite2D
 			_ispr.scale = (_ip.get("base_scale", Vector2.ONE) as Vector2) * _scale_t
 			_ip["pos"] = _core_p.lerp(_targets[_pi], _move_t)
 			_ispr.position = _ip["pos"]
+
 		if story_intro_timer <= 0.0:
 			story_intro_active = false
+			base_sprite.scale = _base_sprite_natural_scale
+			story_core_fade_timer = STORY_CORE_FADE_DURATION
 			for _pi in range(_anim_count):
+				if _pi >= _targets.size():
+					break
 				var _ip: Dictionary = players[_pi]
 				var _ispr := _ip["sprite"] as Sprite2D
 				_ispr.scale = _ip.get("base_scale", Vector2.ONE) as Vector2
 				_ip["pos"] = _targets[_pi]
 				_ispr.position = _ip["pos"]
 				_spawn_effect(AssetPaths.EFFECTS["hit_spark"], _ip["pos"], Vector2(90, 90), 0.35)
+
+	# Core fade-out after intro animation
+	if story_core_fade_timer > 0.0:
+		story_core_fade_timer = maxf(0.0, story_core_fade_timer - delta)
+		if base_sprite != null:
+			base_sprite.modulate.a = story_core_fade_timer / STORY_CORE_FADE_DURATION
+			if story_core_fade_timer <= 0.0:
+				base_sprite.visible = false
+				base_sprite.modulate.a = 1.0
 
 	if not story_intro_active:
 		enemy_spawn_timer -= delta
@@ -3585,31 +4239,7 @@ func _update_story(delta: float) -> void:
 		else:
 			audio_manager.stop_shield_loop()
 
-	if not story_fusion_active and not story_intro_active and not solo_mode:
-		var p1_pos: Vector2 = players[0]["pos"] as Vector2
-		var p2_pos: Vector2 = players[1]["pos"] as Vector2
-		var near_players := p1_pos.distance_to(p2_pos) < 360.0
-		var near_core := p1_pos.distance_to(base_sprite.position) < 430.0 and p2_pos.distance_to(base_sprite.position) < 430.0
-		if near_players or near_core:
-			var link_rate := 11.0
-			coop_link = clampf(coop_link + link_rate * delta, 0.0, 100.0)
-		else:
-			coop_link = clampf(coop_link - 5.0 * delta, 0.0, 100.0)
-
-		# Step C / Step 14:
-		# 繝ｭ繝ｼ繧ｫ繝ｫ2莠ｺ繝励Ξ繧､縺ｧ縺ｯ G / K / Space 縺ｧ蜷井ｽ薙〒縺阪∪縺吶・
-		# 繧ｪ繝ｳ繝ｩ繧､繝ｳ譎ゅ・蜷ПC縺ｮ Space 蜈･蜉帙′InputRouter邨檎罰縺ｧ螻翫￥縺溘ａ縲・
-		# _is_any_online_action_pressed() 繧ょ粋菴薙ヨ繝ｪ繧ｬ繝ｼ縺ｫ蜷ｫ繧√∪縺吶・
-		var fusion_trigger_pressed := (
-			Input.is_key_pressed(KEY_G)
-			or Input.is_key_pressed(KEY_K)
-			or Input.is_key_pressed(KEY_SPACE)
-			or _is_any_online_action_pressed()
-		)
-		if coop_link >= 100.0 and fusion_trigger_pressed:
-			_activate_story_fusion("CO-OP LINK 100%")
-	else:
-		coop_link = 0.0
+	coop_link = 0.0
 
 	# ── Gate 1 ────────────────────────────────────────────────────────
 	if gate_sprite != null and not gate_destroyed:
@@ -3703,23 +4333,26 @@ func _update_story(delta: float) -> void:
 		if not online_game_active or _is_game_host():
 			var any_gate_open := gate_open or (story_stage_number >= 2 and gate2_open) or (story_stage_number >= 3 and gate3_open)
 			var all_gates_gone := gate_destroyed and gate2_destroyed and gate3_destroyed
-			if enemy_spawn_timer <= 0.0 and any_gate_open and not all_gates_gone:
-				_spawn_enemy()
-				enemy_spawn_timer = rng.randf_range(0.65, 1.15)
+			# Rhythm beat drives gate attacks and item spawning (all modes)
+			var _beat_interval := 60.0 / rhythm_bpm
+			rhythm_beat_timer -= delta
+			rhythm_flash_timer = maxf(0.0, rhythm_flash_timer - delta)
+			if gate_sprite != null and not gate_destroyed:
+				var _fi := clampf(rhythm_flash_timer / 0.10, 0.0, 1.0)
+				gate_sprite.modulate = Color(1.0 + _fi, 1.0 + _fi * 0.5, 1.0 - _fi * 0.5, 1.0)
+			if rhythm_beat_timer <= 0.0 and not all_gates_gone:
+				rhythm_beat_timer += _beat_interval
+				_on_rhythm_beat(any_gate_open, all_gates_gone)
 			if item_spawn_timer <= 0.0:
 				_spawn_item()
-				item_spawn_timer = rng.randf_range(5.0, 8.0)
+				item_spawn_timer = rng.randf_range(6.0, 10.0)
 	_update_enemies(delta)
 	_update_enemy_bullets(delta)
-	if base_hp <= 0:
-		_game_over("CORE DESTROYED", "The central core collapsed.\nTeam Score: %d\nPress R to return to Home" % team_score)
+	# game over is triggered directly from _on_player_hit when all lives reach 0
 
 
-func _activate_story_fusion(reason: String = "LINK READY") -> void:
-	if mode != GameMode.STORY:
-		return
-
-	story_fusion_active = true
+func _activate_story_fusion(_reason: String = "LINK READY") -> void:
+	return  # fusion mechanic disabled
 	story_fusion_timer = story_fusion_duration
 	story_fusion_cannon_cd = 0.0
 	story_fusion_bomb_cd = 0.0
@@ -4079,6 +4712,44 @@ func _fire_bomber_shot(from: Vector2, target: Vector2) -> void:
 	enemy_bullets.append(b)
 
 
+func _on_rhythm_beat(any_gate_open: bool, all_gates_gone: bool) -> void:
+	rhythm_flash_timer = 0.10
+	rhythm_beat_count += 1
+	if not any_gate_open or all_gates_gone or players.is_empty():
+		return
+	# Fire one bullet per beat from gate toward each player
+	if gate_sprite != null and gate_open and not gate_destroyed:
+		for _rp in players:
+			if int(_rp["id"]) - 1 < player_lives.size() and player_lives[int(_rp["id"]) - 1] > 0:
+				var _dir := ((_rp["pos"] as Vector2) - gate_pos).normalized()
+				_spawn_gate_bullet(gate_pos, _dir)
+	# Every 4th beat: spawn an extra enemy
+	if rhythm_beat_count % 4 == 0 and not all_gates_gone:
+		_spawn_enemy()
+	# Every 8th beat: double volley (extra spread shot)
+	if rhythm_beat_count % 8 == 0 and gate_sprite != null and gate_open and not gate_destroyed:
+		for _rp in players:
+			if int(_rp["id"]) - 1 < player_lives.size() and player_lives[int(_rp["id"]) - 1] > 0:
+				var _base_dir := ((_rp["pos"] as Vector2) - gate_pos).normalized()
+				var _spread := 0.28
+				_spawn_gate_bullet(gate_pos, _base_dir.rotated(-_spread))
+				_spawn_gate_bullet(gate_pos, _base_dir.rotated(_spread))
+
+
+func _spawn_gate_bullet(from_pos: Vector2, direction: Vector2) -> void:
+	var _speed := 380.0 + rhythm_beat_count * 0.5  # gradually speeds up
+	_speed = minf(_speed, 650.0)
+	var spr := AssetPaths.create_sprite(AssetPaths.PROJECTILES["enemy"], Vector2(22, 22), Color(1.0, 0.35, 0.20), 8)
+	spr.position = from_pos
+	add_child(spr)
+	var b := {
+		"id": _next_entity_id(), "pos": from_pos, "vel": direction * _speed,
+		"sprite": spr, "damage": 1, "owner": 0,
+		"radius": 9.0, "life": 5.0,
+	}
+	enemy_bullets.append(b)
+
+
 func _update_enemy_bullets(delta: float) -> void:
 	var core_pos: Vector2 = base_sprite.position
 	for i in range(enemy_bullets.size() - 1, -1, -1):
@@ -4110,27 +4781,13 @@ func _update_enemy_bullets(delta: float) -> void:
 				break
 		if _hit_player:
 			continue
-		# Hit core
-		if pos.distance_to(core_pos) < 42.0 + float(b["radius"]):
-			if core_shield_time > 0.0:
-				core_shield_time = maxf(0.0, core_shield_time - 1.0)
-				_spawn_effect(AssetPaths.EFFECTS["shield_bubble"], core_pos, Vector2(290, 290), 0.28)
-				if audio_manager != null:
-					audio_manager.play_sfx("shield_hit", -6.0)
-			else:
-				base_hp = max(0, base_hp - int(b["damage"]))
-				if audio_manager != null:
-					audio_manager.play_sfx("core_damage", -7.0)
-			if is_instance_valid(b["sprite"]):
-				(b["sprite"] as Sprite2D).queue_free()
-			enemy_bullets.remove_at(i)
 
 func _update_enemies(delta: float) -> void:
 	var stunned := emp_stun_timer > 0.0
 	for i in range(enemies.size() - 1, -1, -1):
 		var e: Dictionary = enemies[i]
 		var target: Vector2 = base_sprite.position
-		if mode != GameMode.STORY and players.size() > 0:
+		if players.size() > 0:
 			target = players[i % players.size()]["pos"]
 		var pos: Vector2 = e["pos"]
 		var dir := (target - pos).normalized()
@@ -4188,15 +4845,6 @@ func _update_enemies(delta: float) -> void:
 					_spawn_split_cell_frag(pos)
 					_spawn_split_cell_frag(pos)
 		elif pos.y > screen_size.y + 100 or pos.distance_to(target) < 60.0:
-			if mode == GameMode.STORY and core_shield_time > 0.0:
-				core_shield_time = maxf(0.0, core_shield_time - 1.0)
-				_spawn_effect(AssetPaths.EFFECTS["shield_bubble"], base_sprite.position, Vector2(290, 290), 0.28)
-				if audio_manager != null:
-					audio_manager.play_sfx("shield_hit", -6.0)
-			else:
-				base_hp = max(0, base_hp - 8)
-				if audio_manager != null:
-					audio_manager.play_sfx("core_damage", -7.0)
 			if online_game_active:
 				_send_game_event({"event": "enemy_died", "id": int(e.get("id", -1))})
 			if is_instance_valid(e["sprite"]):
@@ -4215,8 +4863,13 @@ func _on_player_hit(pi: int) -> void:
 	if player_lives[pi] <= 0:
 		if is_instance_valid(p["sprite"]):
 			(p["sprite"] as Sprite2D).visible = false
-		if player_lives[0] <= 0 and player_lives[1] <= 0:
-			base_hp = 0
+		var _all_dead := true
+		for _ali in range(player_count):
+			if player_lives[_ali] > 0:
+				_all_dead = false
+				break
+		if _all_dead:
+			_game_over("GAME OVER", "All pilots lost.\nScore: %d\nPress R to return to Home" % team_score)
 
 func _gate_damage_key(ratio: float) -> String:
 	if ratio > 0.80: return "gate_0"
@@ -4349,21 +5002,12 @@ func _spawn_item() -> void:
 	# Weighted pool: heal×3, rapid_fire×2, shield×2, power_boost×2, link_charge×1 = 10 total
 	# In solo mode, link_charge is omitted (no partner to fuse with)
 	var pool: Array[String]
-	if solo_mode:
-		pool = [
-			"heal", "heal", "heal",
-			"rapid_fire", "rapid_fire",
-			"shield", "shield",
-			"power_boost", "power_boost",
-		]
-	else:
-		pool = [
-			"heal", "heal", "heal",
-			"rapid_fire", "rapid_fire",
-			"shield", "shield",
-			"power_boost", "power_boost",
-			"link_charge",
-		]
+	pool = [
+		"heal", "heal", "heal",
+		"rapid_fire", "rapid_fire",
+		"shield", "shield",
+		"power_boost", "power_boost",
+	]
 	var key: String = pool[rng.randi_range(0, pool.size() - 1)]
 	var pos := Vector2(rng.randf_range(120.0, screen_size.x - 120.0), rng.randf_range(160.0, screen_size.y - 180.0))
 	var sprite := AssetPaths.create_sprite(AssetPaths.ITEMS[key], Vector2(76, 76), Color(0.2, 1.0, 0.7), 12)
@@ -4395,25 +5039,27 @@ func _apply_item(key: String, p: Dictionary) -> void:
 
 	match key:
 		"heal":
-			base_hp = min(CORE_HP_MAX, base_hp + 20)
+			# Restore 1 life to the collecting pilot
+			var _pi := int(p["id"]) - 1
+			if _pi >= 0 and _pi < player_lives.size():
+				player_lives[_pi] = mini(player_lives[_pi] + 1, PLAYER_LIVES_MAX)
 			if audio_manager != null:
 				audio_manager.play_sfx("item_heal", -5.0)
 
 		"rapid_fire":
-			# Step B: Rapid Fire is personalized.
 			p["rapid"] = 6.0
 			if audio_manager != null:
 				audio_manager.play_sfx("item_rapid_fire", -5.0)
 
 		"shield":
-			# P2 is the defensive pilot, so Shield lasts longer when P2 collects it.
-			core_shield_time = 10.0 if player_id == 2 else 7.0
-			core_shield_max = core_shield_time
-			_spawn_effect(AssetPaths.EFFECTS["shield_bubble"], base_sprite.position, Vector2(340, 340) if player_id == 2 else Vector2(300, 300), 0.55)
+			# Grant personal invincibility to the collector
+			var _spi := player_id - 1
+			if _spi >= 0 and _spi < player_inv_timer.size():
+				player_inv_timer[_spi] = maxf(player_inv_timer[_spi], 5.0)
+			_spawn_effect(AssetPaths.EFFECTS["shield_bubble"], p["pos"], Vector2(200, 200), 0.55)
 			if audio_manager != null:
 				audio_manager.play_sfx("item_shield", -5.0)
 				audio_manager.play_sfx("shield_activate", -5.0)
-				audio_manager.start_shield_loop()
 
 		"power_boost":
 			# Step B: personalized Power Boost.
@@ -4643,28 +5289,13 @@ func _update_ui() -> void:
 func _update_story_hud_bar() -> void:
 	if story_hud_container == null:
 		return
-	var fusion := story_fusion_active
-
-	# ── Core HP bar ──────────────────────────────────────────────────
-	var hp_ratio := clampf(float(base_hp) / float(CORE_HP_MAX), 0.0, 1.0)
-	story_core_bar_fill.size.x = 130.0 * hp_ratio
-	story_core_label.text = "%d/%d" % [base_hp, CORE_HP_MAX]
-	var r := 1.0 - hp_ratio * 0.55
-	var g := hp_ratio * 0.80
-	story_core_bar_fill.color = Color(r, g, 0.12)
-
-	# ── Shield bar ───────────────────────────────────────────────────
-	if core_shield_time > 0.0:
-		var shd_ratio := clampf(core_shield_time / maxf(core_shield_max, 1.0), 0.0, 1.0)
-		story_shield_bar_fill.size.x = 110.0 * shd_ratio
-		story_shield_bar_bg.visible  = true
-		story_shield_bar_fill.visible = true
-		story_shield_label.visible   = false
-	else:
-		story_shield_bar_bg.visible   = false
-		story_shield_bar_fill.visible = false
-		story_shield_label.visible    = true
-		story_shield_label.text       = "--"
+	# Core and shield bars hidden (no core HP mechanic)
+	story_core_bar_bg.visible    = false
+	story_core_bar_fill.visible  = false
+	story_core_label.visible     = false
+	story_shield_bar_bg.visible  = false
+	story_shield_bar_fill.visible = false
+	story_shield_label.visible   = false
 
 	# ── Score ────────────────────────────────────────────────────────
 	story_score_label.text = "%d" % team_score
@@ -4674,7 +5305,7 @@ func _update_story_hud_bar() -> void:
 		var _active := _si < player_lives[0]
 		var _low := player_lives[0] <= 2
 		(story_p1_life_segs[_si] as ColorRect).color = \
-			(Color(1.0, 0.18, 0.12) if _low else Color(0.10, 0.90, 0.28)) if _active else Color(0.05, 0.12, 0.05)
+			(Color(1.0, 0.18, 0.12) if _low else Color(0.15, 0.55, 1.0)) if _active else Color(0.02, 0.04, 0.12)
 		(story_p1_life_hi[_si] as ColorRect).color.a = 0.60 if _active else 0.0
 	for _si in range(story_p2_life_segs.size()):
 		var _active := _si < player_lives[1]
@@ -4682,6 +5313,18 @@ func _update_story_hud_bar() -> void:
 		(story_p2_life_segs[_si] as ColorRect).color = \
 			(Color(1.0, 0.28, 0.05) if _low else Color(0.95, 0.70, 0.05)) if _active else Color(0.14, 0.09, 0.02)
 		(story_p2_life_hi[_si] as ColorRect).color.a = 0.60 if _active else 0.0
+	for _si in range(story_p3_life_segs.size()):
+		var _active := _si < player_lives[2]
+		var _low := player_lives[2] <= 2
+		(story_p3_life_segs[_si] as ColorRect).color = \
+			(Color(0.20, 1.0, 0.15) if _low else Color(0.15, 0.95, 0.30)) if _active else Color(0.04, 0.10, 0.04)
+		(story_p3_life_hi[_si] as ColorRect).color.a = 0.60 if _active else 0.0
+	for _si in range(story_p4_life_segs.size()):
+		var _active := _si < player_lives[3]
+		var _low := player_lives[3] <= 2
+		(story_p4_life_segs[_si] as ColorRect).color = \
+			(Color(1.0, 0.20, 1.0) if _low else Color(0.70, 0.20, 1.0)) if _active else Color(0.10, 0.04, 0.14)
+		(story_p4_life_hi[_si] as ColorRect).color.a = 0.60 if _active else 0.0
 
 	# ── Gate HP bar ──────────────────────────────────────────────────
 	if story_gate_bar_fill != null and story_gate_label != null:
@@ -4723,44 +5366,9 @@ func _update_story_hud_bar() -> void:
 		else:
 			story_gate3_label.text = "---"
 
-	# ── CO-OP LINK / FUSION TIME (right side) ────────────────────────
-	# Container visible when link is building or fusion is active
-	var link_active := coop_link > 0.0 or fusion
-	story_link_container.visible = link_active
+	# Link/Fusion bar hidden (no fusion mechanic)
+	story_link_container.visible = false
 
-	if link_active:
-		if fusion:
-			# Timer bar replaces link gauge — shrinks as fusion counts down
-			var fuse_ratio := clampf(story_fusion_timer / maxf(story_fusion_duration, 1.0), 0.0, 1.0)
-			story_link_header_label.text = "FUSION TIME"
-			story_link_header_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20))
-			story_link_bar_bg.color      = Color(0.10, 0.06, 0.02)
-			story_link_bar_fill.size.x   = 130.0 * fuse_ratio
-			story_link_bar_fill.color    = Color(1.0, 0.75, 0.10)
-			story_link_label.text        = "💣%d/%d  %.0fs" % [bombs.size(), story_bomb_max_count, story_fusion_timer]
-			story_link_label.add_theme_color_override("font_color", Color(1.0, 0.90, 0.45))
-			story_link_label.visible     = true
-			story_fusion_label.visible   = false
-			story_mode_label.text        = "FUSION MODE"
-			story_mode_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20))
-		else:
-			# Link gauge — grows toward 100%
-			var lk := clampf(coop_link / 100.0, 0.0, 1.0)
-			story_link_header_label.text = "CO-OP LINK"
-			story_link_header_label.add_theme_color_override("font_color", Color(0.45, 0.60, 0.80))
-			story_link_bar_bg.color      = Color(0.04, 0.10, 0.10)
-			story_link_bar_fill.size.x   = 130.0 * lk
-			if coop_link >= 100.0:
-				story_link_bar_fill.color = Color(1.0, 0.95, 0.20)
-				story_link_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.20))
-			else:
-				story_link_bar_fill.color = Color(0.20, 1.0, 0.65)
-				story_link_label.add_theme_color_override("font_color", Color(0.20, 1.0, 0.65))
-			story_link_label.text        = "%.0f%%" % coop_link
-			story_link_label.visible     = true
-			story_fusion_label.visible   = false
-			story_mode_label.text        = "CO-OP DEFENSE"
-			story_mode_label.add_theme_color_override("font_color", Color(0.55, 0.80, 1.0))
 
 
 func _print_network_input_debug() -> void:
@@ -4896,11 +5504,14 @@ func _setup_debug_overlay() -> void:
 # ─── Player ship rebuild ──────────────────────────────────────────────────────
 
 func _rebuild_player_ships() -> void:
-	const _SHIP_PATHS: Array[String] = ["p1", "p2"]
-	const _SHIP_COLORS: Array[Color] = [Color(0.2, 0.85, 1.0), Color(1.0, 0.66, 0.18)]
+	const _SHIP_PATHS: Array[String] = ["p1", "p2", "p3", "p4"]
+	const _SHIP_COLORS: Array[Color] = [
+		Color(0.2, 0.85, 1.0), Color(1.0, 0.66, 0.18),
+		Color(0.15, 1.0, 0.35), Color(0.75, 0.25, 1.0)
+	]
 	for p in players:
 		var _pid: int = int(p["id"]) - 1
-		var _sid: int = clampi(int(player_ship_map[_pid] if _pid < player_ship_map.size() else _pid + 1) - 1, 0, 1)
+		var _sid: int = clampi(int(player_ship_map[_pid] if _pid < player_ship_map.size() else _pid + 1) - 1, 0, _SHIP_PATHS.size() - 1)
 		var _path: String = AssetPaths.PLAYERS[_SHIP_PATHS[_sid]]
 		var _col: Color = _SHIP_COLORS[_sid]
 		(p["sprite"] as Sprite2D).texture = AssetPaths.load_texture(_path, _col)
@@ -4947,33 +5558,37 @@ func _setup_story_mode_select() -> void:
 	sub.add_theme_color_override("font_color", Color(0.50, 0.72, 0.88))
 	story_mode_select_layer.add_child(sub)
 
-	var bw := 520.0
-	var bh := 100.0
+	var bw := 420.0
+	var bh := 120.0
 	var cx := screen_size.x * 0.5
 	var by := 360.0
+	var gap := 60.0
 
-	var s_btn := _create_premium_button("SINGLE PLAYER", Vector2(cx - bw - 40.0, by), Vector2(bw, bh))
+	var s_btn := _create_premium_button("SINGLE PLAYER", Vector2(cx - bw - gap * 0.5, by), Vector2(bw, bh))
 	s_btn.pressed.connect(_on_story_single_selected)
 	story_mode_select_layer.add_child(s_btn)
 
-	var d_btn := _create_premium_button("CO-OP DOUBLE", Vector2(cx + 40.0, by), Vector2(bw, bh))
-	d_btn.pressed.connect(_on_story_double_selected)
-	story_mode_select_layer.add_child(d_btn)
+	var m_btn := _create_premium_button("MULTI PLAYER", Vector2(cx + gap * 0.5, by), Vector2(bw, bh))
+	m_btn.pressed.connect(_on_story_multi_selected)
+	story_mode_select_layer.add_child(m_btn)
 
-	var _desc_texts := [
-		"Solo defense — select your ship and fight alone",
-		"Online co-op — create or join a room\n(Expandable to 4 players)",
-	]
-	var _desc_xs := [cx - bw - 40.0, cx + 40.0]
-	for _di in range(2):
-		var lbl := Label.new()
-		lbl.text = str(_desc_texts[_di])
-		lbl.position = Vector2(float(_desc_xs[_di]), by + bh + 12.0)
-		lbl.size = Vector2(bw, 60)
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		lbl.add_theme_font_size_override("font_size", 20)
-		lbl.add_theme_color_override("font_color", Color(0.50, 0.72, 0.88))
-		story_mode_select_layer.add_child(lbl)
+	var desc_s := Label.new()
+	desc_s.text = "Solo — fight alone\nChoose your ship from 4 types"
+	desc_s.position = Vector2(cx - bw - gap * 0.5, by + bh + 12.0)
+	desc_s.size = Vector2(bw, 60)
+	desc_s.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc_s.add_theme_font_size_override("font_size", 18)
+	desc_s.add_theme_color_override("font_color", Color(0.50, 0.72, 0.88))
+	story_mode_select_layer.add_child(desc_s)
+
+	var desc_m := Label.new()
+	desc_m.text = "2–4 players local co-op\nP1:WASD+F  P2:Arrow+L  P3:Numpad"
+	desc_m.position = Vector2(cx + gap * 0.5, by + bh + 12.0)
+	desc_m.size = Vector2(bw, 60)
+	desc_m.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc_m.add_theme_font_size_override("font_size", 18)
+	desc_m.add_theme_color_override("font_color", Color(0.50, 0.72, 0.88))
+	story_mode_select_layer.add_child(desc_m)
 
 	var back_btn := Button.new()
 	back_btn.text = "BACK"
@@ -5002,27 +5617,40 @@ func _on_story_single_selected() -> void:
 	_cs_configs[0]["joined"] = true
 	_cs_configs[0]["ready"] = false
 	_cs_configs[1]["joined"] = false
+	_solo_cs_idx = clampi(int(_cs_configs[0].get("ship_id", 1)) - 1, 0, 3)
 	_update_char_select()
 	char_select_layer.visible = true
 
 
-func _on_story_double_selected() -> void:
+func _on_story_multi_selected() -> void:
 	if audio_manager != null:
 		audio_manager.play_sfx("ui_confirm", -6.0)
 	story_mode_select_layer.visible = false
-	char_select_mode = "double"
-	_cs_configs[0]["joined"] = true
-	_cs_configs[0]["ready"] = false
-	_cs_configs[1]["joined"] = false
-	_cs_configs[1]["ready"] = false
+	char_select_mode = "multi"
+	_cs_configs[0]["joined"] = true;  _cs_configs[0]["ready"] = false
+	for _mi in range(1, 4):
+		_cs_configs[_mi]["joined"] = false
+		_cs_configs[_mi]["ready"] = false
 	_update_char_select()
 	char_select_layer.visible = true
 
 
 # ─── Character Select ─────────────────────────────────────────────────────────
 
-const _CS_SHIP_NAMES := ["Azure Wing", "Solar Fang"]
-const _CS_SHIP_COLORS := [Color(0.20, 0.85, 1.00), Color(1.00, 0.66, 0.18)]
+const _CS_SHIP_NAMES := ["Azure Wing", "Solar Fang", "Emerald Claw", "Violet Phantom"]
+const _CS_SHIP_COLORS := [Color(0.20, 0.85, 1.00), Color(1.00, 0.66, 0.18), Color(0.15, 1.00, 0.35), Color(0.75, 0.25, 1.00)]
+const _CS_PREVIEW_PATHS: Array[String] = [
+	"res://assets/players/player_azure_wing.png",
+	"res://assets/players/player_solar_fang.png",
+	"res://assets/players/player_emerald_claw.png",
+	"res://assets/players/player_violet_phantom.png",
+]
+const _CS_SHIP_DESCS: Array[String] = [
+	"A balanced all-rounder ready for any mission. Reliable speed and a steady fire rate make it the ideal first choice for pilots of all skill levels.",
+	"A heavy assault striker built for pure power. Each shot delivers devastating damage — but its slow reload demands precise, deliberate timing.",
+	"A speed-focused interceptor with lightning reflexes. Rapid-fire bursts and elite mobility let it weave through even the densest bullet storms.",
+	"An obliterator-class gunship packing the heaviest ordnance available. One clean shot changes the fight — but patience is the price you pay.",
+]
 
 func _setup_char_select() -> void:
 	char_select_layer = CanvasLayer.new()
@@ -5082,22 +5710,45 @@ func _setup_char_select() -> void:
 	join_btn.pressed.connect(_on_cs_join_room)
 	_cs_room_area.add_child(join_btn)
 
-	# Player panels
+	# Player panels (4 slots always created; visibility controlled by mode)
 	_cs_panels.clear(); _cs_ship_btns.clear(); _cs_ship_imgs.clear()
 	_cs_name_edits.clear(); _cs_status_lbls.clear(); _cs_ready_btns.clear()
-	const PANEL_W := 500.0
+	_cs_active_btns.clear(); _cs_ship_opts.clear(); _cs_ctrl_btns.clear()
+	const PANEL_W := 440.0
 	const PANEL_H := 540.0
-	const PANEL_GAP := 36.0
+	const PANEL_GAP := 20.0
 	var panel_y := 174.0
-	for _si in range(2):
-		var _total_w := PANEL_W * 2 + PANEL_GAP
-		var _px := screen_size.x * 0.5 - _total_w * 0.5 + _si * (PANEL_W + PANEL_GAP)
-		var _panel := _cs_make_panel(_si, _px, panel_y, PANEL_W, PANEL_H)
+	for _si in range(4):
+		var _panel := _cs_make_panel(_si, 0.0, panel_y, PANEL_W, PANEL_H)
 		char_select_layer.add_child(_panel)
 		_cs_panels.append(_panel)
 
+	# ── CPU Difficulty row ──────────────────────────────────────────────
+	var diff_row_y := panel_y + PANEL_H + 16.0
+	var diff_lbl := Label.new()
+	diff_lbl.text = "CPU DIFFICULTY"
+	diff_lbl.position = Vector2(screen_size.x * 0.5 - 380.0, diff_row_y + 12)
+	diff_lbl.size = Vector2(220, 32)
+	diff_lbl.add_theme_font_size_override("font_size", 17)
+	diff_lbl.add_theme_color_override("font_color", Color(0.55, 0.72, 0.88))
+	diff_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	char_select_layer.add_child(diff_lbl)
+
+	const DIFF_LABELS: Array[String] = ["EASY", "NORMAL", "HARD", "EXPERT"]
+	const DIFF_COLORS: Array[Color]  = [Color(0.30, 1.00, 0.40), Color(0.95, 0.85, 0.20), Color(1.00, 0.50, 0.10), Color(1.00, 0.20, 0.20)]
+	_cs_diff_btns.clear()
+	for _di in range(4):
+		var _db := Button.new()
+		_db.text = DIFF_LABELS[_di]
+		_db.position = Vector2(screen_size.x * 0.5 - 150.0 + _di * 82.0, diff_row_y)
+		_db.size = Vector2(74, 52)
+		_db.add_theme_font_size_override("font_size", 15)
+		_db.pressed.connect(_on_cs_diff_selected.bind(_di))
+		char_select_layer.add_child(_db)
+		_cs_diff_btns.append(_db)
+
 	# START and BACK buttons
-	var btn_y := panel_y + PANEL_H + 22.0
+	var btn_y := panel_y + PANEL_H + 86.0
 	_cs_start_btn = _create_premium_button("START GAME", Vector2(screen_size.x * 0.5 - 220.0, btn_y), Vector2(440.0, 70.0))
 	_cs_start_btn.pressed.connect(_on_cs_start_game)
 	char_select_layer.add_child(_cs_start_btn)
@@ -5110,6 +5761,9 @@ func _setup_char_select() -> void:
 	back_btn.pressed.connect(_on_cs_back)
 	char_select_layer.add_child(back_btn)
 
+	# Solo mode slide carousel (built once, shown/hidden by mode)
+	_setup_solo_carousel()
+
 	# Connect network signals
 	if network_client != null:
 		if not network_client.peer_joined.is_connected(_on_cs_peer_joined):
@@ -5118,8 +5772,191 @@ func _setup_char_select() -> void:
 			network_client.room_changed.connect(_on_cs_room_changed)
 
 
+func _setup_solo_carousel() -> void:
+	_solo_carousel = Control.new()
+	_solo_carousel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_solo_carousel.visible = false
+	char_select_layer.add_child(_solo_carousel)
+
+	var cx := screen_size.x * 0.5
+	const PREVIEW_Y := 120.0
+	const PREVIEW_SZ := 280.0
+
+	# Ship preview image
+	_solo_preview_img = TextureRect.new()
+	_solo_preview_img.position = Vector2(cx - PREVIEW_SZ * 0.5, PREVIEW_Y)
+	_solo_preview_img.size = Vector2(PREVIEW_SZ, PREVIEW_SZ)
+	_solo_preview_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_solo_preview_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_solo_carousel.add_child(_solo_preview_img)
+
+	# Left / right arrow buttons
+	var left_btn := Button.new()
+	left_btn.text = "◀"
+	left_btn.position = Vector2(cx - 380.0, PREVIEW_Y + PREVIEW_SZ * 0.5 - 44.0)
+	left_btn.size = Vector2(88.0, 88.0)
+	left_btn.add_theme_font_size_override("font_size", 38)
+	left_btn.pressed.connect(func(): _solo_cs_navigate(-1))
+	_solo_carousel.add_child(left_btn)
+
+	var right_btn := Button.new()
+	right_btn.text = "▶"
+	right_btn.position = Vector2(cx + 292.0, PREVIEW_Y + PREVIEW_SZ * 0.5 - 44.0)
+	right_btn.size = Vector2(88.0, 88.0)
+	right_btn.add_theme_font_size_override("font_size", 38)
+	right_btn.pressed.connect(func(): _solo_cs_navigate(1))
+	_solo_carousel.add_child(right_btn)
+
+	# Mouse drag area (swipe left/right over the preview)
+	var drag_area := Control.new()
+	drag_area.position = Vector2(cx - PREVIEW_SZ * 0.5, PREVIEW_Y)
+	drag_area.size = Vector2(PREVIEW_SZ, PREVIEW_SZ)
+	drag_area.mouse_filter = Control.MOUSE_FILTER_STOP
+	drag_area.gui_input.connect(_on_solo_carousel_drag)
+	_solo_carousel.add_child(drag_area)
+
+	# Ship name
+	_solo_name_lbl = Label.new()
+	_solo_name_lbl.position = Vector2(0.0, PREVIEW_Y + PREVIEW_SZ + 20.0)
+	_solo_name_lbl.size = Vector2(screen_size.x, 60.0)
+	_solo_name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_solo_name_lbl.add_theme_font_size_override("font_size", 48)
+	_solo_carousel.add_child(_solo_name_lbl)
+
+	# Dot indicators (4 dots)
+	_solo_dots.clear()
+	for _di in range(4):
+		var dot := ColorRect.new()
+		dot.size = Vector2(14.0, 14.0)
+		dot.position = Vector2(cx - 27.0 + _di * 18.0, PREVIEW_Y + PREVIEW_SZ + 90.0)
+		dot.color = Color(0.25, 0.35, 0.50)
+		_solo_carousel.add_child(dot)
+		_solo_dots.append(dot)
+
+	# Stat bars: SPEED, POWER, FIRE RATE
+	const STAT_NAMES := ["SPEED", "POWER", "FIRE RATE"]
+	const STAT_COLORS: Array[Color] = [
+		Color(0.20, 0.90, 1.00),
+		Color(1.00, 0.42, 0.18),
+		Color(0.22, 1.00, 0.52),
+	]
+	const BAR_W := 280.0
+	_solo_stat_bars.clear()
+	for _si in range(3):
+		var _sy := PREVIEW_Y + PREVIEW_SZ + 118.0 + _si * 42.0
+		var _lbl := Label.new()
+		_lbl.text = STAT_NAMES[_si]
+		_lbl.position = Vector2(cx - 240.0, _sy)
+		_lbl.size = Vector2(110.0, 30.0)
+		_lbl.add_theme_font_size_override("font_size", 17)
+		_lbl.add_theme_color_override("font_color", Color(0.55, 0.72, 0.88))
+		_solo_carousel.add_child(_lbl)
+
+		var _bg := ColorRect.new()
+		_bg.position = Vector2(cx - 120.0, _sy + 5.0)
+		_bg.size = Vector2(BAR_W, 20.0)
+		_bg.color = Color(0.06, 0.10, 0.16)
+		_solo_carousel.add_child(_bg)
+
+		var _fill := ColorRect.new()
+		_fill.position = Vector2(cx - 120.0, _sy + 5.0)
+		_fill.size = Vector2(0.0, 20.0)
+		_fill.color = STAT_COLORS[_si]
+		_solo_carousel.add_child(_fill)
+		_solo_stat_bars.append(_fill)
+
+	# Description text
+	_solo_desc_lbl = Label.new()
+	_solo_desc_lbl.position = Vector2(cx - 440.0, PREVIEW_Y + PREVIEW_SZ + 252.0)
+	_solo_desc_lbl.size = Vector2(880.0, 80.0)
+	_solo_desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_solo_desc_lbl.add_theme_font_size_override("font_size", 20)
+	_solo_desc_lbl.add_theme_color_override("font_color", Color(0.78, 0.88, 0.95))
+	_solo_desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_solo_carousel.add_child(_solo_desc_lbl)
+
+	# START GAME and BACK buttons
+	const BTN_Y := 820.0
+	var start_btn := _create_premium_button(
+		"START GAME", Vector2(cx - 220.0, BTN_Y), Vector2(440.0, 70.0))
+	start_btn.pressed.connect(_on_cs_start_game)
+	_solo_carousel.add_child(start_btn)
+
+	var back_btn := Button.new()
+	back_btn.text = "BACK"
+	back_btn.position = Vector2(cx + 240.0, BTN_Y + 10.0)
+	back_btn.size = Vector2(160.0, 50.0)
+	back_btn.add_theme_font_size_override("font_size", 20)
+	back_btn.pressed.connect(_on_cs_back)
+	_solo_carousel.add_child(back_btn)
+
+	_update_solo_carousel()
+
+
+func _update_solo_carousel() -> void:
+	if _solo_carousel == null:
+		return
+	var idx := clampi(_solo_cs_idx, 0, 3)
+	_cs_configs[0]["ship_id"] = idx + 1
+
+	# Ship image — use AssetPaths.load_texture so PNGs without .import still load
+	if _solo_preview_img != null:
+		_solo_preview_img.texture = AssetPaths.load_texture(
+			_CS_PREVIEW_PATHS[idx], _CS_SHIP_COLORS[idx], Vector2i(280, 280))
+
+	# Name + colour
+	if _solo_name_lbl != null:
+		_solo_name_lbl.text = _CS_SHIP_NAMES[idx]
+		_solo_name_lbl.add_theme_color_override("font_color", _CS_SHIP_COLORS[idx])
+
+	# Dot indicators
+	for _di in range(_solo_dots.size()):
+		var _dot := _solo_dots[_di] as ColorRect
+		_dot.color = _CS_SHIP_COLORS[idx] if _di == idx else Color(0.18, 0.26, 0.38)
+		_dot.size = Vector2(18.0, 18.0) if _di == idx else Vector2(12.0, 12.0)
+
+	# Stat bars — values come from top-of-file SHIP_STATS_* constants
+	const _STATS_TABLE: Array = [
+		SHIP_STATS_AZURE_WING,
+		SHIP_STATS_SOLAR_FANG,
+		SHIP_STATS_EMERALD_CLAW,
+		SHIP_STATS_VIOLET_PHANTOM,
+	]
+	const BAR_W := 280.0
+	var _sv: Array = _STATS_TABLE[idx]
+	for _si in range(_solo_stat_bars.size()):
+		var _bar := _solo_stat_bars[_si] as ColorRect
+		_bar.size.x = BAR_W * float(_sv[_si])
+
+	# Description
+	if _solo_desc_lbl != null:
+		_solo_desc_lbl.text = _CS_SHIP_DESCS[idx]
+
+
+func _solo_cs_navigate(dir: int) -> void:
+	_solo_cs_idx = (_solo_cs_idx + dir + 4) % 4
+	if audio_manager != null:
+		audio_manager.play_sfx("ui_select", -6.0)
+	_update_solo_carousel()
+
+
+func _on_solo_carousel_drag(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var _mb := event as InputEventMouseButton
+		if _mb.button_index == MOUSE_BUTTON_LEFT:
+			if _mb.pressed:
+				_solo_drag_start_x = _mb.position.x
+			elif _solo_drag_start_x >= 0.0:
+				var _dx := _mb.position.x - _solo_drag_start_x
+				if _dx < -40.0:
+					_solo_cs_navigate(1)
+				elif _dx > 40.0:
+					_solo_cs_navigate(-1)
+				_solo_drag_start_x = -1.0
+
+
 func _cs_make_panel(slot: int, px: float, py: float, pw: float, ph: float) -> Control:
-	const SLOT_COLORS: Array[Color] = [Color(0.20, 0.85, 1.00), Color(1.00, 0.66, 0.18)]
+	const SLOT_COLORS: Array[Color] = [Color(0.20, 0.85, 1.00), Color(1.00, 0.66, 0.18), Color(0.15, 1.00, 0.35), Color(0.75, 0.25, 1.00)]
 	var slot_col: Color = SLOT_COLORS[clampi(slot, 0, SLOT_COLORS.size() - 1)]
 
 	var panel := Control.new()
@@ -5137,98 +5974,148 @@ func _cs_make_panel(slot: int, px: float, py: float, pw: float, ph: float) -> Co
 	inner.color = Color(0.04, 0.06, 0.12)
 	panel.add_child(inner)
 
-	var header := Label.new()
-	header.text = "P%d" % (slot + 1)
-	header.position = Vector2(0, 14)
-	header.size = Vector2(pw, 40)
-	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	header.add_theme_font_size_override("font_size", 32)
-	header.add_theme_color_override("font_color", slot_col)
-	panel.add_child(header)
+	# ── Active toggle (P1 = always active) ──────────────────────────
+	var is_joined: bool = bool(_cs_configs[slot].get("joined", false))
+	var active_btn := Button.new()
+	active_btn.text = "P%d  ●  ACTIVE" % (slot + 1) if is_joined else "P%d  —  ACTIVATE" % (slot + 1)
+	active_btn.position = Vector2(12, 10)
+	active_btn.size = Vector2(pw - 24, 52)
+	active_btn.add_theme_font_size_override("font_size", 21)
+	if is_joined:
+		active_btn.add_theme_color_override("font_color", slot_col)
+	active_btn.pressed.connect(_on_cs_active_toggled.bind(slot))
+	panel.add_child(active_btn)
+	_cs_active_btns.append(active_btn)
 
+	# ── Name input ───────────────────────────────────────────────────
 	var name_lbl := Label.new()
 	name_lbl.text = "NAME"
-	name_lbl.position = Vector2(24, 68)
-	name_lbl.size = Vector2(80, 28)
-	name_lbl.add_theme_font_size_override("font_size", 18)
+	name_lbl.position = Vector2(14, 76)
+	name_lbl.size = Vector2(70, 28)
+	name_lbl.add_theme_font_size_override("font_size", 16)
 	name_lbl.add_theme_color_override("font_color", Color(0.55, 0.72, 0.88))
 	panel.add_child(name_lbl)
 
 	var name_edit := LineEdit.new()
 	name_edit.text = str(_cs_configs[slot].get("name", "PLAYER %d" % (slot + 1)))
-	name_edit.position = Vector2(110, 66)
-	name_edit.size = Vector2(pw - 134, 34)
+	name_edit.position = Vector2(90, 74)
+	name_edit.size = Vector2(pw - 104, 32)
 	name_edit.max_length = 16
-	name_edit.add_theme_font_size_override("font_size", 20)
+	name_edit.add_theme_font_size_override("font_size", 18)
 	name_edit.text_changed.connect(func(t: String): _cs_on_name_changed(slot, t))
 	panel.add_child(name_edit)
 	_cs_name_edits.append(name_edit)
 
-	var ship_label := Label.new()
-	ship_label.text = "SHIP"
-	ship_label.position = Vector2(24, 118)
-	ship_label.size = Vector2(80, 28)
-	ship_label.add_theme_font_size_override("font_size", 18)
-	ship_label.add_theme_color_override("font_color", Color(0.55, 0.72, 0.88))
-	panel.add_child(ship_label)
+	# ── Ship dropdown (OptionButton) ─────────────────────────────────
+	var ship_lbl := Label.new()
+	ship_lbl.text = "SHIP"
+	ship_lbl.position = Vector2(14, 120)
+	ship_lbl.size = Vector2(70, 28)
+	ship_lbl.add_theme_font_size_override("font_size", 16)
+	ship_lbl.add_theme_color_override("font_color", Color(0.55, 0.72, 0.88))
+	panel.add_child(ship_lbl)
 
-	const _CS_PREVIEW_PATHS: Array[String] = [
-		"res://assets/players/player_azure_wing.png",
-		"res://assets/players/player_solar_fang.png",
-	]
-	var slot_ship_btns: Array = []
-	for shi in range(2):
-		var img_rect := TextureRect.new()
-		img_rect.position = Vector2(24, 150 + shi * 72)
-		img_rect.size = Vector2(54, 54)
-		img_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		img_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		if ResourceLoader.exists(_CS_PREVIEW_PATHS[shi]):
-			img_rect.texture = load(_CS_PREVIEW_PATHS[shi])
-		panel.add_child(img_rect)
+	var ship_opt := OptionButton.new()
+	for _shi in range(4):
+		ship_opt.add_item(_CS_SHIP_NAMES[_shi])
+	var _init_ship := clampi(int(_cs_configs[slot].get("ship_id", slot + 1)) - 1, 0, 3)
+	ship_opt.selected = _init_ship
+	ship_opt.position = Vector2(90, 116)
+	ship_opt.size = Vector2(pw - 104, 36)
+	ship_opt.add_theme_font_size_override("font_size", 17)
+	ship_opt.item_selected.connect(_on_cs_ship_option.bind(slot))
+	panel.add_child(ship_opt)
+	_cs_ship_opts.append(ship_opt)
+	_cs_ship_btns.append([])  # size parity only
 
-		var sbtn := Button.new()
-		sbtn.text = _CS_SHIP_NAMES[shi]
-		sbtn.position = Vector2(88, 148 + shi * 72)
-		sbtn.size = Vector2(pw - 112, 58)
-		sbtn.add_theme_font_size_override("font_size", 22)
-		sbtn.pressed.connect(_on_cs_ship_selected.bind(slot, shi + 1))
-		panel.add_child(sbtn)
-		slot_ship_btns.append(sbtn)
-	_cs_ship_btns.append(slot_ship_btns)
-
-	# Selected ship preview (large, centered)
+	# ── Ship preview image ────────────────────────────────────────────
 	var preview_img := TextureRect.new()
-	preview_img.position = Vector2(pw * 0.5 - 64, 300)
-	preview_img.size = Vector2(128, 128)
+	preview_img.position = Vector2(pw * 0.5 - 56, 162)
+	preview_img.size = Vector2(112, 112)
 	preview_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	preview_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	var init_idx := clampi(int(_cs_configs[slot].get("ship_id", slot + 1)) - 1, 0, 1)
-	if ResourceLoader.exists(_CS_PREVIEW_PATHS[init_idx]):
-		preview_img.texture = load(_CS_PREVIEW_PATHS[init_idx])
+	preview_img.texture = AssetPaths.load_texture(_CS_PREVIEW_PATHS[_init_ship], _CS_SHIP_COLORS[_init_ship], Vector2i(112, 112))
 	panel.add_child(preview_img)
 	_cs_ship_imgs.append(preview_img)
 
+	# ── Control type: PLAYER / CPU ────────────────────────────────────
+	var ctrl_lbl := Label.new()
+	ctrl_lbl.text = "CONTROL"
+	ctrl_lbl.position = Vector2(14, 286)
+	ctrl_lbl.size = Vector2(pw - 20, 24)
+	ctrl_lbl.add_theme_font_size_override("font_size", 15)
+	ctrl_lbl.add_theme_color_override("font_color", Color(0.55, 0.72, 0.88))
+	panel.add_child(ctrl_lbl)
+
+	var half_w := (pw - 36.0) * 0.5
+	var human_btn := Button.new()
+	human_btn.text = "PLAYER"
+	human_btn.position = Vector2(12, 314)
+	human_btn.size = Vector2(half_w, 38)
+	human_btn.add_theme_font_size_override("font_size", 17)
+	human_btn.pressed.connect(_on_cs_ctrl_toggled.bind(slot, false))
+	panel.add_child(human_btn)
+
+	var cpu_btn := Button.new()
+	cpu_btn.text = "CPU"
+	cpu_btn.position = Vector2(12.0 + half_w + 12.0, 314)
+	cpu_btn.size = Vector2(half_w, 38)
+	cpu_btn.add_theme_font_size_override("font_size", 17)
+	cpu_btn.pressed.connect(_on_cs_ctrl_toggled.bind(slot, true))
+	panel.add_child(cpu_btn)
+	_cs_ctrl_btns.append([human_btn, cpu_btn])
+
+	# ── Status label ──────────────────────────────────────────────────
 	var status_lbl := Label.new()
 	status_lbl.text = "Waiting..."
-	status_lbl.position = Vector2(0, ph - 120)
+	status_lbl.position = Vector2(0, ph - 118)
 	status_lbl.size = Vector2(pw, 34)
 	status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_lbl.add_theme_font_size_override("font_size", 22)
+	status_lbl.add_theme_font_size_override("font_size", 20)
 	status_lbl.add_theme_color_override("font_color", Color(0.60, 0.70, 0.80))
 	panel.add_child(status_lbl)
 	_cs_status_lbls.append(status_lbl)
 
+	# ── Ready button ──────────────────────────────────────────────────
 	var ready_btn := Button.new()
 	ready_btn.text = "READY"
-	ready_btn.position = Vector2(24, ph - 78)
-	ready_btn.size = Vector2(pw - 48, 58)
+	ready_btn.position = Vector2(12, ph - 76)
+	ready_btn.size = Vector2(pw - 24, 58)
 	ready_btn.add_theme_font_size_override("font_size", 24)
 	ready_btn.pressed.connect(_on_cs_ready_toggled.bind(slot))
 	panel.add_child(ready_btn)
 	_cs_ready_btns.append(ready_btn)
 
 	return panel
+
+
+func _on_cs_active_toggled(slot: int) -> void:
+	if slot == 0:
+		return  # P1 always active
+	var cfg: Dictionary = _cs_configs[slot]
+	var was_joined: bool = bool(cfg.get("joined", false))
+	cfg["joined"] = not was_joined
+	if was_joined:
+		cfg["ready"] = false
+	_update_char_select()
+	_cs_broadcast()
+
+
+func _on_cs_ship_option(idx: int, slot: int) -> void:
+	_cs_configs[slot]["ship_id"] = idx + 1
+	_update_char_select()
+	_cs_broadcast()
+
+
+func _on_cs_ctrl_toggled(slot: int, is_cpu: bool) -> void:
+	_cs_configs[slot]["is_cpu"] = is_cpu
+	_update_char_select()
+	_cs_broadcast()
+
+
+func _on_cs_diff_selected(level: int) -> void:
+	cpu_difficulty = clampi(level, 0, 3)
+	_update_char_select()
 
 
 func _cs_on_name_changed(slot: int, text: String) -> void:
@@ -5239,90 +6126,129 @@ func _cs_on_name_changed(slot: int, text: String) -> void:
 func _update_char_select() -> void:
 	if char_select_layer == null:
 		return
-	var is_double := char_select_mode == "double"
+	var is_multi  := char_select_mode == "multi"
 	var is_single := char_select_mode == "single"
-	_cs_room_area.visible = is_double
-	if is_double and network_client != null:
-		var rc := network_client.room_id if network_client.room_id != "" else "----"
-		_cs_room_lbl.text = "ROOM: %s" % rc
 
-	var shown := 1 if is_single else 2
-	const PANEL_W := 500.0
-	const PANEL_GAP := 36.0
-	var total_w := PANEL_W * shown + PANEL_GAP * (shown - 1)
+	# Single mode uses the dedicated carousel — skip the panel layout entirely
+	if _solo_carousel != null:
+		_solo_carousel.visible = is_single
+	if is_single:
+		for _sp in _cs_panels:
+			(_sp as Control).visible = false
+		if _cs_start_btn != null:
+			_cs_start_btn.visible = false
+		_cs_room_area.visible = false
+		for _db in _cs_diff_btns:
+			(_db as Button).visible = false
+		_update_solo_carousel()
+		return
+
+	# Multi mode: room area hidden (local-only)
+	_cs_room_area.visible = false
+
+	# All 4 panels visible in multi mode
+	const PANEL_W := 440.0
+	const PANEL_GAP := 20.0
+	const SHOWN := 4
+	var total_w := PANEL_W * SHOWN + PANEL_GAP * (SHOWN - 1)
 	var start_x := screen_size.x * 0.5 - total_w * 0.5
 	for si in range(_cs_panels.size()):
 		var panel := _cs_panels[si] as Control
-		panel.visible = si < shown
-		if si < shown:
-			panel.position.x = start_x + si * (PANEL_W + PANEL_GAP)
+		panel.visible = true
+		panel.position.x = start_x + si * (PANEL_W + PANEL_GAP)
 
-	var local_slot := 0
-	if is_double and online_game_active:
-		local_slot = max(0, online_local_player_id - 1)
+	# Control key hints per slot (shown when unjoined)
+	const JOIN_HINTS: Array[String] = [
+		"P1  WASD + F",
+		"P2  Arrow + L",
+		"P3  Numpad 8/4/2/6 + 0",
+		"P4  (Controller — soon)",
+	]
 
 	for si in range(_cs_panels.size()):
-		if si >= shown:
-			continue
+		var panel := _cs_panels[si] as Control
 		var cfg: Dictionary = _cs_configs[si]
-		var is_local := (si == local_slot)
+		var joined: bool = bool(cfg.get("joined", false))
+		var ready:  bool = bool(cfg.get("ready",  false))
 
-		(_cs_name_edits[si] as LineEdit).editable = is_local
-		(_cs_name_edits[si] as LineEdit).modulate.a = 1.0 if is_local else 0.6
+		# Dim un-joined panels so the player count is obvious at a glance
+		panel.modulate = Color(1.0, 1.0, 1.0, 1.0) if joined else Color(0.7, 0.7, 0.8, 0.45)
 
-		var sel_ship := int(cfg.get("ship_id", 1))
-		for shi in range(2):
-			var sbtn := _cs_ship_btns[si][shi] as Button
-			sbtn.disabled = not is_local
-			if shi + 1 == sel_ship:
-				sbtn.add_theme_color_override("font_color", _CS_SHIP_COLORS[shi])
-				sbtn.modulate = Color(1.0, 1.0, 1.0, 1.0)
+		(_cs_name_edits[si] as LineEdit).editable = joined
+		(_cs_name_edits[si] as LineEdit).modulate.a = 1.0 if joined else 0.5
+
+		var sel_ship := int(cfg.get("ship_id", si + 1))
+
+		# ── Active button appearance ──────────────────────────────────
+		if si < _cs_active_btns.size():
+			var abtn := _cs_active_btns[si] as Button
+			if joined:
+				abtn.text = "P%d  ●  ACTIVE" % (si + 1)
+				abtn.add_theme_color_override("font_color", _CS_SHIP_COLORS[clampi(si, 0, _CS_SHIP_COLORS.size() - 1)])
 			else:
-				sbtn.remove_theme_color_override("font_color")
-				sbtn.modulate = Color(0.45, 0.45, 0.45, 0.9)
+				abtn.text = "P%d  —  ACTIVATE" % (si + 1)
+				abtn.remove_theme_color_override("font_color")
 
+		# ── OptionButton ship dropdown ────────────────────────────────
+		if si < _cs_ship_opts.size():
+			var sopt := _cs_ship_opts[si] as OptionButton
+			sopt.disabled = not joined
+			var _sidx := clampi(sel_ship - 1, 0, 3)
+			if sopt.selected != _sidx:
+				sopt.selected = _sidx
+
+		# ── Ship preview ──────────────────────────────────────────────
 		if si < _cs_ship_imgs.size():
-			const _UPD_PATHS: Array[String] = [
-				"res://assets/players/player_azure_wing.png",
-				"res://assets/players/player_solar_fang.png",
-			]
-			var pidx := clampi(sel_ship - 1, 0, 1)
+			var pidx := clampi(sel_ship - 1, 0, _CS_PREVIEW_PATHS.size() - 1)
 			var prev := _cs_ship_imgs[si] as TextureRect
-			if prev.texture == null or ResourceLoader.exists(_UPD_PATHS[pidx]):
-				prev.texture = load(_UPD_PATHS[pidx])
+			prev.texture = AssetPaths.load_texture(_CS_PREVIEW_PATHS[pidx], _CS_SHIP_COLORS[pidx], Vector2i(112, 112))
+
+		# ── PLAYER / CPU buttons ──────────────────────────────────────
+		if si < _cs_ctrl_btns.size():
+			var _cbpair := _cs_ctrl_btns[si] as Array
+			var _is_cpu := bool(cfg.get("is_cpu", false))
+			if _cbpair.size() >= 2:
+				(_cbpair[0] as Button).disabled = not joined
+				(_cbpair[1] as Button).disabled = not joined
+				(_cbpair[0] as Button).modulate = Color(1.0, 1.0, 1.0, 1.0) if (joined and not _is_cpu) else Color(0.45, 0.45, 0.45, 0.8)
+				(_cbpair[1] as Button).modulate = Color(1.0, 0.65, 0.15, 1.0) if (joined and _is_cpu) else Color(0.45, 0.45, 0.45, 0.8)
 
 		var status_lbl := _cs_status_lbls[si] as Label
-		var ready_btn := _cs_ready_btns[si] as Button
-		var joined: bool = bool(cfg.get("joined", false))
-		var ready: bool = bool(cfg.get("ready", false))
+		var ready_btn  := _cs_ready_btns[si]  as Button
 
-		if is_single:
-			status_lbl.visible = false
-			ready_btn.visible = false
-		elif not joined:
-			status_lbl.text = "Waiting for player..."
-			status_lbl.add_theme_color_override("font_color", Color(0.45, 0.55, 0.65))
-			ready_btn.visible = false
+		if not joined:
+			status_lbl.text = JOIN_HINTS[si]
+			status_lbl.add_theme_color_override("font_color", Color(0.38, 0.52, 0.70))
 			status_lbl.visible = true
+			ready_btn.text    = "JOIN"
+			ready_btn.visible = true
 		elif ready:
 			status_lbl.text = "READY!"
 			status_lbl.add_theme_color_override("font_color", Color(0.30, 1.00, 0.45))
-			ready_btn.text = "CANCEL"
-			ready_btn.visible = is_local
 			status_lbl.visible = true
+			ready_btn.text    = "CANCEL"
+			ready_btn.visible = true
 		else:
 			status_lbl.text = "Press READY when set"
 			status_lbl.add_theme_color_override("font_color", Color(0.60, 0.70, 0.80))
-			ready_btn.text = "READY"
-			ready_btn.visible = is_local
 			status_lbl.visible = true
+			ready_btn.text    = "READY"
+			ready_btn.visible = true
 
-	var can_start := false
-	if is_single:
-		can_start = true
-	elif is_double:
-		can_start = _cs_is_host() and _cs_all_joined_ready()
-	_cs_start_btn.visible = can_start
+	# ── CPU Difficulty button highlights ─────────────────────────────
+	const _DIFF_ACTIVE_COLS: Array[Color] = [Color(0.30, 1.00, 0.40), Color(0.95, 0.85, 0.20), Color(1.00, 0.50, 0.10), Color(1.00, 0.20, 0.20)]
+	for _di in range(_cs_diff_btns.size()):
+		var _db := _cs_diff_btns[_di] as Button
+		_db.visible = true
+		if _di == cpu_difficulty:
+			_db.modulate = Color(1.0, 1.0, 1.0, 1.0)
+			_db.add_theme_color_override("font_color", _DIFF_ACTIVE_COLS[_di])
+		else:
+			_db.modulate = Color(0.45, 0.45, 0.45, 0.8)
+			_db.remove_theme_color_override("font_color")
+
+	# START available when at least P1 is ready and all joined players are ready
+	_cs_start_btn.visible = _cs_all_joined_ready()
 
 
 func _cs_is_host() -> bool:
@@ -5344,7 +6270,13 @@ func _on_cs_ship_selected(slot: int, ship_id: int) -> void:
 
 
 func _on_cs_ready_toggled(slot: int) -> void:
-	_cs_configs[slot]["ready"] = not bool(_cs_configs[slot].get("ready", false))
+	var cfg: Dictionary = _cs_configs[slot]
+	if char_select_mode == "multi" and not bool(cfg.get("joined", false)):
+		# First press = JOIN (become active; ship select becomes available)
+		cfg["joined"] = true
+		cfg["ready"]  = false
+	else:
+		cfg["ready"] = not bool(cfg.get("ready", false))
 	_update_char_select()
 	_cs_broadcast()
 
@@ -5450,32 +6382,41 @@ func _cs_on_room_state(room_state: Dictionary) -> void:
 
 func _on_cs_back() -> void:
 	char_select_layer.visible = false
-	if online_game_active and char_select_mode == "double":
-		online_game_active = false
 	story_mode_select_layer.visible = true
 
 
 func _on_cs_start_game() -> void:
 	if audio_manager != null:
 		audio_manager.play_sfx("ui_confirm", -6.0)
-	if char_select_mode == "double" and online_game_active:
-		# Broadcast final config to P2, then both start
-		var payload := {"event": "cs_start", "slot_count": 2}
-		for si in range(_cs_configs.size()):
-			payload["p%d" % si] = {
-				"ship_id": int(_cs_configs[si].get("ship_id", si + 1)),
-				"name": str(_cs_configs[si].get("name", "PLAYER %d" % (si + 1))),
-			}
-		_send_game_event(payload)
 	_apply_cs_configs_and_start()
 
 
 func _apply_cs_configs_and_start() -> void:
-	for si in range(mini(_cs_configs.size(), player_ship_map.size())):
-		player_ship_map[si] = int(_cs_configs[si].get("ship_id", si + 1))
-	for si in range(mini(_cs_configs.size(), player_name_map.size())):
-		player_name_map[si] = str(_cs_configs[si].get("name", "PLAYER %d" % (si + 1)))
-	solo_mode = (char_select_mode == "single")
+	match char_select_mode:
+		"single":
+			player_count = 1
+		"multi":
+			player_count = 0
+			for _cfg in _cs_configs:
+				if bool(_cfg.get("joined", false)):
+					player_count += 1
+			player_count = clampi(player_count, 1, 4)
+		_:
+			player_count = 2
+	solo_mode = (player_count == 1)
+	# Compact ONLY joined configs into consecutive player slots so that
+	# player_ship_map[0..player_count-1] matches exactly who is playing.
+	var _ji := 0
+	for si in range(_cs_configs.size()):
+		if not bool(_cs_configs[si].get("joined", false)):
+			continue
+		if _ji < player_ship_map.size():
+			player_ship_map[_ji] = int(_cs_configs[si].get("ship_id", si + 1))
+		if _ji < player_name_map.size():
+			player_name_map[_ji] = str(_cs_configs[si].get("name", "PLAYER %d" % (_ji + 1)))
+		if _ji < player_cpu_map.size():
+			player_cpu_map[_ji] = bool(_cs_configs[si].get("is_cpu", false))
+		_ji += 1
 	if solo_mode:
 		online_game_active = false
 		set_online_input_mode(true, 1)

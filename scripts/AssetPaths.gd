@@ -3,6 +3,8 @@ extends RefCounted
 const PLAYERS := {
 	"p1": "res://assets/players/player_azure_wing.png",
 	"p2": "res://assets/players/player_solar_fang.png",
+	"p3": "res://assets/players/player_emerald_claw.png",
+	"p4": "res://assets/players/player_violet_phantom.png",
 	"fusion": "res://assets/players/player_twin_core_fusion.png",
 }
 
@@ -28,6 +30,9 @@ const PROJECTILES := {
 	"basic": "res://assets/projectiles/projectile_basic_shot.png",
 	"azure": "res://assets/projectiles/projectile_azure_shot.png",
 	"solar": "res://assets/projectiles/projectile_solar_shot.png",
+	"emerald": "res://assets/projectiles/emerald_shot.png",
+	"violet": "res://assets/projectiles/violet_shot.png",
+	"bomb_shot": "res://assets/projectiles/projectile_bomb_shot.png",
 	"enemy": "res://assets/projectiles/projectile_enemy_bolt.png",
 	"boss_orb": "res://assets/projectiles/projectile_boss_orb.png",
 	"boss_ord": "res://assets/projectiles/projectile_boss_orb.png",
@@ -41,6 +46,8 @@ const EFFECTS := {
 	"hit_spark": "res://assets/effects/effect_hit_spark.png",
 	"shield_bubble": "res://assets/effects/effect_shield_bubble.png",
 	"dash_trail": "res://assets/effects/effect_dash_trail.png",
+	"support_aura": "res://assets/effects/effect_support_aura.png",
+	"team_shield": "res://assets/effects/effect_team_shield.png",
 }
 
 const ITEMS := {
@@ -54,6 +61,10 @@ const ITEMS := {
 	"crystal": "res://assets/items/item_crystal.png",
 	"crystal_magnet": "res://assets/items/item_crystal_magnet.png",
 	"emp_burst": "res://assets/items/item_emp_burst.png",
+	"role_attacker": "res://assets/items/item_role_attacker.png",
+	"role_defender": "res://assets/items/item_role_defender.png",
+	"role_support": "res://assets/items/item_role_support.png",
+	"role_bomber": "res://assets/items/item_role_bomber.png",
 }
 
 const WEAPONS := {
@@ -98,6 +109,7 @@ const UI := {
 	"boss_hp_back": "res://assets/ui/ui_bar_boss_hp_back.png",
 	"link_fill": "res://assets/ui/ui_bar_link_fill.png",
 	"shop": "res://assets/ui/ui_shop_icon.png",
+	"logo": "res://assets/ui/logo_core_pulse.png",
 }
 
 

@@ -16,6 +16,7 @@ const PlayerInputStateScript := preload("res://scripts/input/PlayerInputState.gd
 enum InputProfile {
 	CLASSIC_P1,
 	CLASSIC_P2,
+	CLASSIC_P3,
 	ONLINE_P1,
 	ONLINE_P2
 }
@@ -34,6 +35,12 @@ func ensure_online_input_actions() -> void:
 	_add_key_action("online_move_down", KEY_DOWN)
 	_add_key_action("online_shoot", KEY_SPACE)
 	_add_key_action("online_bomb", KEY_SPACE)
+	# P3 local: Numpad 8/4/2/6 for movement, Numpad0 for shoot
+	_add_key_action("p3_move_up",    KEY_KP_8)
+	_add_key_action("p3_move_down",  KEY_KP_2)
+	_add_key_action("p3_move_left",  KEY_KP_4)
+	_add_key_action("p3_move_right", KEY_KP_6)
+	_add_key_action("p3_shoot",      KEY_KP_0)
 
 
 func get_input_state(profile: int) -> PlayerInputState:
@@ -52,6 +59,12 @@ func get_input_state(profile: int) -> PlayerInputState:
 			state.aim = state.move
 			state.shoot = Input.is_key_pressed(KEY_L)
 			state.bomb = Input.is_key_pressed(KEY_L)
+
+		InputProfile.CLASSIC_P3:
+			# P3 local: Numpad 8/4/2/6 + Numpad0
+			state.move = Input.get_vector("p3_move_left", "p3_move_right", "p3_move_up", "p3_move_down")
+			state.aim = state.move
+			state.shoot = Input.is_action_pressed("p3_shoot")
 
 		InputProfile.ONLINE_P1:
 			# Online P1: arrows + Space.
