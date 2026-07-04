@@ -39,7 +39,7 @@ func setup(local: LocalInputProvider, network: NetworkInputProvider) -> void:
 
 func configure_online_mode(enabled: bool, player_id: int = 1) -> void:
 	online_input_mode = enabled
-	local_player_id = clampi(player_id, 1, 2)
+	local_player_id = clampi(player_id, 1, 4)
 
 
 func get_p1_input() -> PlayerInputState:

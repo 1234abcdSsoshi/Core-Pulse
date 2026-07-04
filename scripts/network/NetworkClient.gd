@@ -25,7 +25,7 @@ signal room_changed(room_id: String)
 signal peer_joined(player_id: int)
 signal peer_left(player_id: int)
 signal room_state_received(room_state: Dictionary)
-signal game_start_received(stage_name: String)
+signal game_start_received(stage_name: String, player_count: int)
 signal game_event_received(ev: Dictionary)
 
 var socket: WebSocketPeer = null
@@ -177,8 +177,9 @@ func _handle_message(message: Dictionary) -> void:
 		NetworkMessagesScript.TYPE_GAME_START:
 			# Step 12: 蜈ｨ繧ｯ繝ｩ繧､繧｢繝ｳ繝医′蜷後§繧ｹ繝・・繧ｸ繧帝幕蟋九＠縺ｾ縺吶・
 			var stage_name := str(message.get("stage", "story"))
-			game_start_received.emit(stage_name)
-			print("[NetworkClient] Game start: " + stage_name)
+			var pc := int(message.get("player_count", 2))
+			game_start_received.emit(stage_name, pc)
+			print("[NetworkClient] Game start: %s  players: %d" % [stage_name, pc])
 
 		NetworkMessagesScript.TYPE_GAME_EVENT:
 			game_event_received.emit(message)

@@ -80,16 +80,17 @@ function roomState(room) {
       ready: ws ? Boolean(ws.ready) : false,
     };
   }
-  const p1Ready = room.players.has(1) && Boolean(room.players.get(1).ready);
-  const p2Ready = room.players.has(2) && Boolean(room.players.get(2).ready);
   return {
     room_id: room.id,
     stage: room.stage,
     host_player_id: room.hostPlayerId,
-    can_start: p1Ready && p2Ready,
+    player_count: room.players.size,
+    can_start: room.players.has(room.hostPlayerId),
     players: {
       p1: playerData(1),
       p2: playerData(2),
+      p3: playerData(3),
+      p4: playerData(4),
     },
   };
 }
@@ -123,15 +124,13 @@ function removeSocketFromRooms(ws) {
 }
 
 function assignPlayer(room, ws) {
-  if (!room.players.has(1)) {
-    room.players.set(1, ws);
-    return 1;
+  for (let id = 1; id <= 4; id++) {
+    if (!room.players.has(id)) {
+      room.players.set(id, ws);
+      return id;
+    }
   }
-  if (!room.players.has(2)) {
-    room.players.set(2, ws);
-    return 2;
-  }
-  return 0;
+  return 0; // Room is full (4/4)
 }
 
 function setSocketRole(room, ws, desiredRole) {
@@ -218,12 +217,10 @@ function handleStartGame(ws, msg) {
   if (!ws.roomId || !rooms.has(ws.roomId)) return sendError(ws, "Join a room first.");
   const room = rooms.get(ws.roomId);
   if (ws.playerId !== room.hostPlayerId) return sendError(ws, "Only the host can start the game.");
-  const state = roomState(room);
-  if (!state.can_start) return sendError(ws, "Both players must be ready.");
   const stage = String(msg.stage || room.stage || "story");
   room.started = true;
-  broadcastToRoom(room, { type: MESSAGE.GAME_START, room_id: room.id, stage }, null);
-  console.log(`[room ${room.id}] game start: ${stage}`);
+  broadcastToRoom(room, { type: MESSAGE.GAME_START, room_id: room.id, stage, player_count: room.players.size }, null);
+  console.log(`[room ${room.id}] game start: ${stage}  players: ${room.players.size}`);
 }
 
 function handleGameEvent(ws, msg) {
@@ -286,7 +283,7 @@ wss.on("connection", (ws, req) => {
 });
 
 setInterval(() => {
-  const summary = Array.from(rooms.values()).map((room) => `${room.id}: ${room.players.size}/2`).join(", ");
+  const summary = Array.from(rooms.values()).map((room) => `${room.id}: ${room.players.size}/4`).join(", ");
   if (summary) console.log(`[rooms] ${summary}`);
 }, 30000);
 

@@ -18,7 +18,9 @@ const PlayerInputStateScript := preload("res://scripts/input/PlayerInputState.gd
 
 var remote_inputs: Dictionary = {
 	1: PlayerInputState.new(),
-	2: PlayerInputState.new()
+	2: PlayerInputState.new(),
+	3: PlayerInputState.new(),
+	4: PlayerInputState.new(),
 }
 
 # Fake online test settings.
@@ -47,7 +49,7 @@ func get_remote_input(player_id: int) -> PlayerInputState:
 func configure_fake_online(enabled: bool, remote_player_id: int) -> void:
 	# Enable this only for Step 4 local testing.
 	fake_online_enabled = enabled
-	fake_remote_player_id = clampi(remote_player_id, 1, 2)
+	fake_remote_player_id = clampi(remote_player_id, 1, 4)
 	fake_time = 0.0
 	fake_shoot_timer = 0.0
 	fake_bomb_timer = 0.0

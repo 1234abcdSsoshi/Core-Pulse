@@ -671,7 +671,7 @@ func _setup_network_client() -> void:
 func set_online_input_mode(enabled: bool, local_player_id: int = 1) -> void:
 	# This is the switch that the future NetworkManager will call after room join.
 	online_input_mode = enabled
-	online_local_player_id = clampi(local_player_id, 1, 2)
+	online_local_player_id = clampi(local_player_id, 1, 4)
 	if input_router != null:
 		input_router.configure_online_mode(online_input_mode, online_local_player_id)
 
@@ -687,7 +687,7 @@ func set_fake_online_test_mode(enabled: bool, local_player_id: int = 1) -> void:
 	# This lets us test online-style input without a server.
 	fake_online_test_mode = enabled
 	online_input_mode = enabled
-	online_local_player_id = clampi(local_player_id, 1, 2)
+	online_local_player_id = clampi(local_player_id, 1, 4)
 	if input_router != null:
 		input_router.configure_online_mode(true, online_local_player_id)
 
@@ -1063,19 +1063,21 @@ func _on_network_room_state_received(room_state: Dictionary) -> void:
 	# Step 9-12:
 	# 繧ｵ繝ｼ繝舌・縺九ｉ螻翫＞縺滄Κ螻九・迥ｶ諷九ｒ繝ｭ繝薙・UI縺ｸ蜿肴丐縺励∪縺吶・
 	# 萓具ｼ啀1/P2縺ｮ蜷榊燕縲ヽeady迥ｶ諷九ヾtart蜿ｯ閭ｽ迥ｶ諷九↑縺ｩ縲・
+	if local_room_layer != null and local_room_layer.visible:
+		_lr_update_online_ui()
 	if online_lobby != null:
 		online_lobby.apply_room_state(room_state)
 
 
-func _on_network_game_start_received(stage_name: String) -> void:
+func _on_network_game_start_received(stage_name: String, player_count: int) -> void:
 	# Step 13:
 	# 繧ｵ繝ｼ繝舌・縺九ｉstart_game縺悟ｱ翫＞縺溘ｉ縲√Ο繝薙・繧帝哩縺倥※繧ｪ繝ｳ繝ｩ繧､繝ｳ繧ｲ繝ｼ繝逕ｻ髱｢縺ｸ遘ｻ陦後＠縺ｾ縺吶・
 	# 螳滄圀縺ｫ縺ｩ縺ｮ繧ｹ繝・・繧ｸ繧定ｪｭ縺ｿ霎ｼ繧縺九・ _start_online_game() 縺ｫ縺ｾ縺ｨ繧√※縺・∪縺吶・
-	print("[Network] Game start: " + stage_name)
-	_start_online_game(stage_name)
+	print("[Network] Game start: %s  players: %d" % [stage_name, player_count])
+	_start_online_game(stage_name, player_count)
 
 
-func _start_online_game(stage_name: String) -> void:
+func _start_online_game(stage_name: String, server_player_count: int = 2) -> void:
 	# Step 13:
 	# 繧ｪ繝ｳ繝ｩ繧､繝ｳ繝励Ξ繧､髢句ｧ区凾縺ｮ蜈ｱ騾壼・逅・〒縺吶・
 	# 縺薙％縺ｧUI繧呈紛逅・＠縺ｦ縺九ｉ縲∵欠螳壹＆繧後◆繧ｹ繝・・繧ｸ繧定ｪｭ縺ｿ霎ｼ縺ｿ縺ｾ縺吶・
@@ -1086,6 +1088,8 @@ func _start_online_game(stage_name: String) -> void:
 	# 繝ｭ繝薙・繝ｻ繧ｿ繧､繝医Ν繝ｻ隱ｬ譏守判髱｢縺ｯ繧ｲ繝ｼ繝繝励Ξ繧､荳ｭ縺ｫ謫堺ｽ懊ｒ驍ｪ鬲斐＠縺ｪ縺・ｈ縺・撼陦ｨ遉ｺ縺ｫ縺励∪縺吶・
 	if online_lobby != null:
 		online_lobby.close_lobby()
+	if local_room_layer != null:
+		local_room_layer.visible = false
 	if title_layer != null:
 		title_layer.visible = false
 	if instruction_layer != null:
@@ -1096,6 +1100,17 @@ func _start_online_game(stage_name: String) -> void:
 	game_over = false
 
 	# 繧ｵ繝ｼ繝舌・縺九ｉP1/P2繧貞牡繧雁ｽ薙※貂医∩縺ｪ繧峨√◎縺ｮ蠖ｹ蜑ｲ繧棚nputRouter縺ｸ蝗ｺ螳壹＠縺ｾ縺吶・
+	# Build player maps before starting so _create_players() gets the correct count.
+	if _lr_has_online_players:
+		_build_online_player_maps_from_slots()
+	else:
+		player_count = clampi(server_player_count, 1, 4)
+		solo_mode = (player_count == 1)
+		for _oi in range(4):
+			player_cpu_map[_oi] = false
+			player_name_map[_oi] = "PLAYER %d" % (_oi + 1)
+			player_ship_map[_oi] = _oi + 1
+
 	set_online_input_mode(true, online_local_player_id)
 	_show_online_status_hud(true)
 
@@ -1109,6 +1124,27 @@ func _start_online_game(stage_name: String) -> void:
 
 	banner_label.text = "ONLINE GAME START"
 
+
+func _build_online_player_maps_from_slots() -> void:
+	var active_count := 0
+	for i in range(4):
+		if bool(_lr_slots[i].get("active", false)):
+			active_count += 1
+	player_count = clampi(active_count, 1, 4)
+	solo_mode = (player_count == 1)
+	var ji := 0
+	for i in range(4):
+		var s: Dictionary = _lr_slots[i]
+		if not bool(s.get("active", false)):
+			continue
+		var si: int = int(s.get("ship_idx", i))
+		if ji < player_ship_map.size():
+			player_ship_map[ji] = si + 1
+		if ji < player_cpu_map.size():
+			player_cpu_map[ji] = false
+		if ji < player_name_map.size():
+			player_name_map[ji] = _LR_SHIP_NAMES[si]
+		ji += 1
 
 func _return_to_online_lobby() -> void:
 	# Step 13:
